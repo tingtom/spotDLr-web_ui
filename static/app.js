@@ -5554,7 +5554,45 @@ function createMenu(anchor) {
     showMenu([
         { label: 'New playlist', icon: 'listAdd', run: () => newPlaylistDialog([]) },
         { label: 'Add music files', icon: 'upload', run: () => addFilesDialog([]) },
+        { label: 'Import playlist CSV', icon: 'upload', run: () => importCsvDialog() },
     ], { anchor, label: 'Create' });
+}
+
+function importCsvDialog() {
+    const existing = S.collections.map((c) => c.name).sort((a, b) => a.localeCompare(b));
+    openModal({
+        title: 'Import playlist CSV',
+        body: html`<form id="csvForm" class="dialog-form">
+            <p class="dialog-note">From Exportify (or any CSV with track and artist columns). Merging into an existing playlist downloads into its folder; new names start a new folder.</p>
+            <div class="field"><span>Playlist</span><select id="csvTarget" class="field-input">${existing.map((n) => html`<option value="${n}">${n}</option>`).join('')}<option value="">New playlist…</option></select></div>
+            <div class="field" id="csvNewWrap" hidden><span>New playlist name</span><input id="csvNew" class="field-input plain" maxlength="80" placeholder="My playlist"></div>
+            <div class="field"><span>CSV file</span><input type="file" id="csvFile" accept=".csv,text/csv"></div>
+            <p class="form-error" id="csvError" hidden></p>
+            <div class="modal-actions"><button type="button" class="pill-btn" data-close>Cancel</button><button type="submit" class="pill-btn primary" id="csvSubmit">Import</button></div>
+        </form>`,
+        onOpen: (modal) => {
+            const target = $('#csvTarget', modal), wrap = $('#csvNewWrap', modal), err = $('#csvError', modal);
+            target.addEventListener('change', () => { wrap.hidden = target.value !== ''; });
+            wrap.hidden = target.value !== '';
+            $('#csvForm', modal).addEventListener('submit', async (e) => {
+                e.preventDefault();
+                err.hidden = true;
+                const name = target.value || $('#csvNew', modal).value.trim();
+                const file = $('#csvFile', modal).files[0];
+                if (!name) { err.textContent = 'Pick or name a playlist.'; err.hidden = false; return; }
+                if (!file) { err.textContent = 'Choose a CSV file.'; err.hidden = false; return; }
+                const submit = $('#csvSubmit', modal);
+                submit.disabled = true;
+                try {
+                    const csvText = await file.text();
+                    const job = await api('/import-csv', { method: 'POST', body: JSON.stringify({ name, csv_text: csvText }) });
+                    modal.querySelector('[data-close]').click();
+                    toast(`Importing ${plural(job.total, 'song')} into ${name}…`);
+                    location.hash = '#/downloads';
+                } catch (error) { err.textContent = error.message; err.hidden = false; submit.disabled = false; }
+            });
+        },
+    });
 }
 
 // ---------- dialogs ----------

@@ -63,11 +63,12 @@ class Downloader:
 
     # ---------- public ----------
 
-    def submit(self, *, query, kind, source="spotify", item_id=None, title=None, image=None, total=None, format="m4a", bitrate="auto", lyrics=False):
+    def submit(self, *, query, kind, source="spotify", item_id=None, title=None, image=None, total=None, format="m4a", bitrate="auto", lyrics=False, queries=None):
         job_id = f"{time.strftime('%Y%m%d%H%M%S')}-{next(self.counter)}"
         job = {
             "id": job_id,
             "query": query,
+            "queries": queries or [query],  # one spotDL query per song (CSV imports pass many)
             "kind": kind,                # track | album | playlist | artist
             "source": source,            # spotify (spotDL) | ytm (yt-dlp) | spotify-embed (Spotify list → YouTube Music)
             "item_id": item_id,
@@ -133,7 +134,7 @@ class Downloader:
 
     def _command(self, job, output_dir):
         cmd = [
-            sys.executable, "-m", "spotdl", "download", job["query"],
+            sys.executable, "-m", "spotdl", "download", *job.get("queries", [job["query"]]),
             "--output", str(output_dir),
             "--format", job["format"],
             "--force-update-metadata",

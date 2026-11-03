@@ -809,6 +809,58 @@ class ZipRequest(BaseModel):
     name: str = "playlist"
 
 
+class CsvImportRequest(BaseModel):
+    name: str
+    csv_text: str
+    format: str = "mp3"
+    bitrate: str = "auto"
+    lyrics: bool = False
+
+
+def _csv_queries(csv_text):
+    """Exportify-style rows → ['Artist - Title', …]. Matches Track/Song/Title
+    and Artist(s) columns loosely; skips incomplete rows."""
+    import csv as _csv
+    import io as _io
+    rows = list(_csv.DictReader(_io.StringIO(csv_text)))
+    if not rows:
+        raise HTTPException(status_code=400, detail="No rows found in the CSV.")
+    cols = {c.strip().lower(): c for c in (rows[0].keys() or [])}
+    def pick(*wants):
+        for w in wants:
+            for key, orig in cols.items():
+                if w in key:
+                    return orig
+        return None
+    title_col = pick("track name", "song name", "track", "song", "title")
+    artist_col = pick("artist name", "artist")
+    if not title_col or not artist_col:
+        raise HTTPException(status_code=400, detail="Couldn't find track and artist columns.")
+    queries = []
+    for r in rows[:2000]:
+        title = (r.get(title_col) or "").strip()
+        artist = (r.get(artist_col) or "").strip()
+        if title and artist:
+            queries.append(f"{artist} - {title}")
+    if not queries:
+        raise HTTPException(status_code=400, detail="No usable artist/title rows found.")
+    return queries
+
+
+@app.post("/api/import-csv")
+def import_csv(request: CsvImportRequest):
+    """One spotDL job from a playlist CSV. The job title becomes the folder,
+    so an existing playlist name merges into its folder instead of forking."""
+    from downloader import safe_folder_name
+    folder = safe_folder_name(request.name or "")
+    if not folder:
+        raise HTTPException(status_code=400, detail="Give the playlist a name.")
+    queries = _csv_queries(request.csv_text)
+    return downloader.submit(query=queries[0], queries=queries, kind="playlist", source="spotify",
+                             title=folder, total=len(queries),
+                             format=request.format, bitrate=request.bitrate, lyrics=request.lyrics)
+
+
 @app.post("/api/zip")
 def download_zip(request: ZipRequest):
     """Bundle library tracks into a numbered zip for one-click browser download
