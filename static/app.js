@@ -5542,6 +5542,7 @@ function collectionMenu(anchor) {
         { label: 'Add to another playlist', icon: 'listAdd', disabled: !ids.length, run: () => addToPlaylistDialog(ids, name) },
         { label: 'Send to device', icon: 'usb', disabled: !ids.length, run: () => sendToDeviceDialog(ids, name, name) },
         { label: 'Download as ZIP', icon: 'download', disabled: !ids.length, run: () => downloadZip(ids, name) },
+        ...(window.showDirectoryPicker ? [{ label: 'Save to USB / folder…', icon: 'usb', disabled: !ids.length, run: () => saveToFolder(ids, name) }] : []),
         ...(c && !S.init.on_phone ? [{ label: 'Open folder', icon: 'folder', run: () => openLibraryLocation({ collection_key: c.key }) }] : []),
         ...(S.init.apple_music ? [{ label: 'Add to Apple Music', icon: 'apple', disabled: !ids.length, run: () => appleMusicDialog(ids, name, name, !(c && c.kind === 'album')) }] : []),
         ...(c && c.editable ? ['-', { label: 'Rename', icon: 'listAdd', run: () => renamePlaylistDialog(c) },
@@ -6146,6 +6147,46 @@ function downloadZip(trackIds, name) {
             toast('ZIP downloading — save it straight onto the USB stick.');
         })
         .catch((error) => toast(error.message, 'error'));
+}
+
+async function saveToFolder(trackIds, name) {
+    // Writes MP3s straight into a folder the user picks (e.g. a USB stick).
+    // Needs a secure context (localhost or HTTPS); otherwise the menu item is hidden.
+    const tracks = trackIds.map((id) => S.byId.get(id)).filter((t) => t && t.path);
+    if (!tracks.length) { toast('Nothing saved yet — download the songs first.', 'error'); return; }
+    let dir;
+    try {
+        dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    } catch { return; } // picker cancelled
+    const clean = (name || 'spotDLr').replace(/[\\/:*?"<>|]/g, '').trim() || 'spotDLr';
+    let sub = dir;
+    try { sub = await dir.getDirectoryHandle(clean, { create: true }); } catch { /* use picked dir */ }
+    let done = 0, failed = 0;
+    const total = tracks.length;
+    openModal({
+        title: `Saving to ${clean}`,
+        body: html`<div class="upload-progress"><div class="progress-bar"><i style="width:0%"></i></div>
+            <p id="folderSaveStatus">Starting…</p></div>
+            <div class="modal-actions"><button type="button" class="pill-btn" data-close>Close</button></div>`,
+    });
+    const bar = $('.progress-bar i'), status = $('#folderSaveStatus');
+    for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        const file = `${String(i + 1).padStart(2, '0')} - ${t.path.split('/').pop()}`;
+        try {
+            const response = await fetch(`/api/stream/${encodeURIComponent(t.id)}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const handle = await sub.getFileHandle(file, { create: true });
+            const writable = await handle.createWritable();
+            await response.body.pipeTo(writable);
+        } catch { failed++; }
+        done++;
+        if (bar) bar.style.width = `${Math.round((done / total) * 100)}%`;
+        if (status) status.textContent = failed ? `${done} of ${total} (${failed} failed)…` : `${done} of ${total}…`;
+    }
+    if (bar) bar.style.width = '100%';
+    if (status) status.textContent = failed ? `Done with ${failed} failed.` : `Done: ${plural(total, 'song')} saved. Eject the device before unplugging it.`;
+    toast(failed ? `Saved with ${failed} failed.` : `Saved ${plural(total, 'song')}.`, failed ? 'error' : '');
 }
 
 function sendToDeviceDialog(trackIds, label, collection) {
