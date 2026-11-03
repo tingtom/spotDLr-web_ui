@@ -23,9 +23,10 @@ from typing import Optional
 
 import requests
 from dotenv import load_dotenv
-from fastapi import BackgroundTask, Body, FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 # Load SPOTIPY_CLIENT_ID / SPOTIPY_CLIENT_SECRET from .env next to this file
