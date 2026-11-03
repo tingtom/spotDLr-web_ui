@@ -254,11 +254,24 @@ def search(query, owned, limit=10):
     }
 
 
+def _all_pages(sp, first_page):
+    """Follow Spotify pagination; a single call returns max 50-100 items."""
+    page = first_page
+    while True:
+        yield page
+        if not page.get("next"):
+            break
+        page = _call(sp.next, page)
+
+
 def album(album_id, owned):
     sp = _get_client()
     a = _call(sp.album, album_id, market=MARKET)
     info = _album(a)
-    info["tracks"] = _clean(_track(t, owned, album=a) for t in (a.get("tracks") or {}).get("items", []))
+    tracks = []
+    for page in _all_pages(sp, a.get("tracks") or {}):
+        tracks += page.get("items", [])
+    info["tracks"] = _clean(_track(t, owned, album=a) for t in tracks)
     info["label"] = a.get("label")
     return info
 
@@ -267,9 +280,11 @@ def playlist(playlist_id, owned):
     sp = _get_client()
     p = _call(sp.playlist, playlist_id, market=MARKET)
     info = _playlist(p)
-    page = p.get("items") or p.get("tracks") or {}
+    entries = []
+    for page in _all_pages(sp, p.get("items") or p.get("tracks") or {}):
+        entries += page.get("items") or []
     # Feb 2026: each entry's "track" became "item"; and Spotify only returns entries for playlists you own
-    info["tracks"] = _clean(_track((entry or {}).get("item") or (entry or {}).get("track"), owned) for entry in page.get("items") or [])
+    info["tracks"] = _clean(_track((entry or {}).get("item") or (entry or {}).get("track"), owned) for entry in entries)
     info["tracks_hidden"] = not info["tracks"] and bool(info["total_tracks"])
     return info
 

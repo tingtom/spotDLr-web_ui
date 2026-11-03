@@ -13,15 +13,17 @@ import json
 import logging
 import os
 import re
+import tempfile
 import threading
 import time
+import zipfile
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import BackgroundTask, Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -799,6 +801,30 @@ def export_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="No such copy job")
     return job
+
+
+class ZipRequest(BaseModel):
+    track_ids: list[str]
+    name: str = "playlist"
+
+
+@app.post("/api/zip")
+def download_zip(request: ZipRequest):
+    """Bundle library tracks into a numbered zip for one-click browser download
+    (save it straight onto a USB stick). Uncompressed: MP3s don't shrink."""
+    paths = _paths_for(request.track_ids)
+    safe = re.sub(r"\s+", " ", (request.name or "playlist")).strip(" .") or "playlist"
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp.close()
+    try:
+        with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_STORED) as zf:
+            for i, path in enumerate(paths):
+                zf.write(path, f"{i + 1:02d} - {path.name}")
+    except Exception:
+        os.unlink(tmp.name)
+        raise
+    return FileResponse(tmp.name, media_type="application/zip", filename=f"{safe}.zip",
+                        background=BackgroundTask(os.unlink, tmp.name))
 
 
 # ---------- Add to Apple Music (apple_music.py) ----------

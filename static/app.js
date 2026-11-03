@@ -5541,6 +5541,7 @@ function collectionMenu(anchor) {
         { label: 'Schedule play', icon: 'clock', disabled: !ids.length, run: () => scheduleDialog(c ? whatForCollection(c) : whatForLiked()) },
         { label: 'Add to another playlist', icon: 'listAdd', disabled: !ids.length, run: () => addToPlaylistDialog(ids, name) },
         { label: 'Send to device', icon: 'usb', disabled: !ids.length, run: () => sendToDeviceDialog(ids, name, name) },
+        { label: 'Download as ZIP', icon: 'download', disabled: !ids.length, run: () => downloadZip(ids, name) },
         ...(c && !S.init.on_phone ? [{ label: 'Open folder', icon: 'folder', run: () => openLibraryLocation({ collection_key: c.key }) }] : []),
         ...(S.init.apple_music ? [{ label: 'Add to Apple Music', icon: 'apple', disabled: !ids.length, run: () => appleMusicDialog(ids, name, name, !(c && c.kind === 'album')) }] : []),
         ...(c && c.editable ? ['-', { label: 'Rename', icon: 'listAdd', run: () => renamePlaylistDialog(c) },
@@ -6122,6 +6123,30 @@ function bindFileDrop() {
 }
 
 // ---------- send to device ----------
+
+function downloadZip(trackIds, name) {
+    toast(`Zipping ${plural(trackIds.length, 'song')}…`);
+    fetch('/api/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_ids: trackIds, name }) })
+        .then(async (response) => {
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || `ZIP failed (${response.status})`);
+            }
+            return response.blob();
+        })
+        .then((blob) => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `${name}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+            toast('ZIP downloading — save it straight onto the USB stick.');
+        })
+        .catch((error) => toast(error.message, 'error'));
+}
 
 function sendToDeviceDialog(trackIds, label, collection) {
     const tracks = trackIds.map((id) => S.byId.get(id)).filter(Boolean);
