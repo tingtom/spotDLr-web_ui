@@ -5563,7 +5563,7 @@ function importCsvDialog() {
     openModal({
         title: 'Import playlist CSV',
         body: html`<form id="csvForm" class="dialog-form">
-            <p class="dialog-note">From Exportify (or any CSV with track and artist columns). Merging into an existing playlist downloads into its folder; new names start a new folder.</p>
+            <p class="dialog-note">From Exportify (or any CSV with track and artist columns). Songs are matched on YouTube Music — no Spotify keys needed. Merging into an existing playlist downloads into its folder; new names start a new folder.</p>
             <div class="field"><span>Playlist</span><select id="csvTarget" class="field-input">${existing.map((n) => html`<option value="${n}">${n}</option>`).join('')}<option value="">New playlist…</option></select></div>
             <div class="field" id="csvNewWrap" hidden><span>New playlist name</span><input id="csvNew" class="field-input plain" maxlength="80" placeholder="My playlist"></div>
             <div class="field"><span>CSV file</span><input type="file" id="csvFile" accept=".csv,text/csv"></div>

@@ -849,14 +849,15 @@ def _csv_queries(csv_text):
 
 @app.post("/api/import-csv")
 def import_csv(request: CsvImportRequest):
-    """One spotDL job from a playlist CSV. The job title becomes the folder,
-    so an existing playlist name merges into its folder instead of forking."""
+    """One background job from a playlist CSV. Rows are matched on YouTube
+    Music (no Spotify keys needed); the job title becomes the folder, so an
+    existing playlist name merges into its folder instead of forking."""
     from downloader import safe_folder_name
     folder = safe_folder_name(request.name or "")
     if not folder:
         raise HTTPException(status_code=400, detail="Give the playlist a name.")
     queries = _csv_queries(request.csv_text)
-    return downloader.submit(query=queries[0], queries=queries, kind="playlist", source="spotify",
+    return downloader.submit(query=queries[0], queries=queries, kind="playlist", source="ytm",
                              title=folder, total=len(queries),
                              format=request.format, bitrate=request.bitrate, lyrics=request.lyrics)
 

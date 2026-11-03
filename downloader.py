@@ -235,8 +235,41 @@ class Downloader:
         """
         import ytmusic
 
-        job.update(status="downloading", message="Finding songs…", started=time.time())
-        if job["source"] == "spotify-embed":
+        job.update(status="downloading", message="Finding songs\u2026", started=time.time())
+        if job.get("queries") and not job.get("item_id"):
+            # CSV import: free-text rows matched on YouTube Music (one filtered
+            # search each). No Spotify involved, so no keys or quotas.
+            metas, missing = [], []
+            queries = job["queries"]
+            for i, q in enumerate(queries):
+                if job.get("cancel_requested"):
+                    break
+                job.update(message=f"Matching {i + 1} of {len(queries)}\u2026")
+                try:
+                    hits = ytmusic._call(ytmusic._client().search, q, filter="songs", limit=3) or []
+                    hit = next((t for t in (ytmusic._track(h) for h in hits) if t), None)
+                except Exception:
+                    hit = None
+                if not hit:
+                    missing.append(q)
+                    continue
+                metas.append({
+                    "video_id": hit["id"], "title": hit["name"],
+                    "artists": [a["name"] for a in hit["artists"]] or ["Unknown artist"],
+                    "album": (hit["album"] or {}).get("name") or hit["name"],
+                    "album_artist": None, "year": None,
+                    "track_number": None, "track_total": None,
+                    "cover_url": (hit["album"] or {}).get("image"),
+                })
+            job["queries"] = None  # resolved; don't do this twice
+            items = [{"name": f"{', '.join(m['artists'])} - {m['title']}", "spotify_id": None,
+                      "video_id": m["video_id"], "resolve": (lambda m=m: m)} for m in metas]
+            job["_missing"] = missing
+            if not items and missing:
+                job.update(status="failed", message="Nothing matched",
+                           error=f"No YouTube Music match for: {', '.join(missing[:5])}", finished=time.time())
+                return
+        elif job["source"] == "spotify-embed":
             title, items, info = ytmusic.spotify_items(job["kind"], job["item_id"])
             if job["kind"] == "playlist" and len(items) >= 100:
                 job["note"] = "Spotify's embed lists at most 100 songs, so a longer playlist stops at 100."
@@ -252,6 +285,9 @@ class Downloader:
         new, skipped, failed = 0, 0, []
         paths = []  # every song's file, in playlist order, owned ones included
         log = deque(maxlen=40)
+        for missing_name in job.pop("_missing", []):
+            failed.append(missing_name)
+            log.append(f"No YouTube Music match, skipped: {missing_name}")
 
         for item in items:
             if job.get("cancel_requested"):
