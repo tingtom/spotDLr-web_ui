@@ -262,6 +262,7 @@ class Downloader:
                     "cover_url": (hit["album"] or {}).get("image"),
                 })
             job["queries"] = None  # resolved; don't do this twice
+            title = None  # keep the job title (the folder name)
             items = [{"name": f"{', '.join(m['artists'])} - {m['title']}", "spotify_id": None,
                       "video_id": m["video_id"], "resolve": (lambda m=m: m)} for m in metas]
             job["_missing"] = missing
