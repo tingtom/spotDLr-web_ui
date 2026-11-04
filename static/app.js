@@ -1858,16 +1858,18 @@ function audioSource(el) {
     return s;
 }
 
-// Tap mode: both players feed the analyser, which passes through to the speakers.
-// Bit-transparent, no rewiring ever needed (a paused player contributes silence).
+// Tap mode: both players go straight to the speakers; the analyser is a side-tap that never
+// touches the output path (some devices attenuate when analysis sits inline). Paused players
+// contribute silence, so both connections are permanent — no rewiring on song swaps.
 function buildTap() {
     const a = audioSource(P.audio), x = audioSource(XF.el);
     try { V.analyser.disconnect(); } catch {}
     try { xfVolume.disconnect(); } catch {} // orphaned crossfade tail must not double through the old chain
     graphVolume = null; xfVolume = null; // stale gains must not hijack applyVolume
+    a.connect(V.ctx.destination);
+    x.connect(V.ctx.destination);
     a.connect(V.analyser);
     x.connect(V.analyser);
-    V.analyser.connect(V.ctx.destination);
 }
 
 // Full graph: analyser feeds the effects chain instead of the speakers directly.
@@ -3246,10 +3248,18 @@ function schedulePoll(delay) {
     clearTimeout(pollTimer);
     pollTimer = setTimeout(pollJobs, delay);
 }
+let lastJobsSig = null;
 
 async function pollJobs() {
     let data;
     try { data = await api('/jobs'); } catch { schedulePoll(5000); return; }
+    const sig = data.jobs.map((j) => `${j.id}:${j.status}:${j.done}`).join('|');
+    const busy = data.jobs.some((j) => ACTIVE.has(j.status));
+    if (sig === lastJobsSig && !busy && route().name !== 'downloads') {
+        schedulePoll(15000); // nothing moved since last poll: skip the DOM work entirely
+        return;
+    }
+    lastJobsSig = sig;
     const before = new Map(S.jobs.map((j) => [j.id, j.status]));
     S.jobs = data.jobs;
     let finished = false;
@@ -6406,19 +6416,24 @@ async function cacheForOffline(trackIds, name) {
                 go.disabled = false;
                 const controller = new AbortController();
                 go.onclick = () => { cancelled = true; controller.abort(); };
-                let done = 0, failed = 0;
+                let done = 0, failed = 0, next = 0;
                 const missing = tracks.filter((t) => !cached.has(t.id));
-                for (const t of missing) {
-                    if (cancelled) break;
-                    status.textContent = `Saving ${done + 1} of ${missing.length}…`;
-                    try {
-                        const r = await fetch(streamUrl(t), { signal: controller.signal });
-                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                        await r.blob();
-                    } catch { if (!cancelled) failed++; }
-                    done++;
-                    bar.style.width = `${Math.round(((cached.size + done) / tracks.length) * 100)}%`;
-                }
+                const worker = async () => {
+                    while (!cancelled) {
+                        const i = next++;
+                        if (i >= missing.length) return;
+                        const t = missing[i];
+                        try {
+                            const r = await fetch(streamUrl(t), { signal: controller.signal });
+                            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                            await r.blob();
+                        } catch { if (!cancelled) failed++; }
+                        done++;
+                        status.textContent = `Saving ${done} of ${missing.length}…`;
+                        bar.style.width = `${Math.round(((cached.size + done) / tracks.length) * 100)}%`;
+                    }
+                };
+                await Promise.all([worker(), worker(), worker()]);
                 await paint();
                 status.textContent = cancelled ? `Stopped after ${done} of ${missing.length}.` :
                     failed ? `Done with ${failed} failed.` : `Done: ${plural(tracks.length, 'song')} ready offline.`;

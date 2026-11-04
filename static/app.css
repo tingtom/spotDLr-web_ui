@@ -1636,8 +1636,8 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: .92em; background
     .extras, .control-buttons .toggle-btn, #npLike { display: none; }  /* ♥ is in Now Playing and the song's swipe */
     .view-pad, .below-hero { padding-left: 16px; padding-right: 16px; }
     .topbar-right { gap: 4px; }
-    .topbar-right > :not(.mobile-more) { display: none; }
-    .topbar .mobile-more { display: grid; width: 44px; height: 44px; }
+    .topbar-right > :not(.mobile-more):not(#settingsBtn) { display: none; }
+    .topbar .mobile-more, .topbar #settingsBtn { display: grid; width: 44px; height: 44px; }
     .search-box { height: 44px; gap: 8px; padding: 0 8px 0 12px; }
     .search-box input { font-size: 16px; } /* under 16px, iOS zooms the page when the box is tapped */
     .search-box:not(.has-value) .clear { display: none; }
@@ -2712,4 +2712,14 @@ button.nv-upnext:hover { background: rgba(var(--fg-rgb), .08); color: var(--text
         justify-self: stretch; width: auto; max-width: none; margin-left: 0; padding: 20px 16px;
     }
     .nv-controls { width: 100%; }
+}
+
+/* Phones: the glass blur is the biggest GPU cost during scrolling. Same look, cheaper
+   radius on the large surfaces (small chips keep their original blur). */
+@media (max-width: 600px) {
+    :root[data-glass="true"] :is(.topbar, .player, .tabbar, .panel, .queue-panel, .menu, .modal,
+        .modal-backdrop, .search-box, .nv, .nv-viz-menu, .action-bar, .card, .chart-card, .below-hero) {
+        -webkit-backdrop-filter: blur(10px) saturate(1.15);
+        backdrop-filter: blur(10px) saturate(1.15);
+    }
 }
