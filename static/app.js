@@ -4283,7 +4283,7 @@ function viewCollection(key) {
         </div>
     </header>
     <div class="below-hero">
-        <div class="action-bar">${tracks.length ? html`${bigPlay(context.key, c.track_ids, context)}${shuffleToggle()}<button class="toggle-btn" data-action="collection-download" aria-label="Download ${c.name} as ZIP" title="Download as ZIP">${icon('download', 22)}</button>` : ''}${collectionMoreButton(c.name)}${tracks.length ? viewToggle() : ''}</div>
+        <div class="action-bar">${tracks.length ? html`${bigPlay(context.key, c.track_ids, context)}${shuffleToggle()}${('serviceWorker' in navigator && 'caches' in window) ? html`<button class="toggle-btn" data-action="collection-cache" aria-label="Save ${c.name} offline on this device" title="Save offline on this device">${icon('download', 22)}</button>` : ''}` : ''}${collectionMoreButton(c.name)}${tracks.length ? viewToggle() : ''}</div>
         ${tracks.length ? localTable(tracks, context, { showAlbum: c.kind !== 'album', sortable: c.editable && tracks.length > 1 })
             : html`<div class="empty"><h2>Let's find something for your playlist</h2><p>On any song, click ${icon('more', 14)} and choose <strong>Add to playlist</strong>.</p></div>`}
     </div>`;
@@ -5233,11 +5233,11 @@ function bindEvents() {
             } else if (action === 'like') toggleLike(actionEl.dataset.likeId);
             else if (action === 'row-menu') rowMenu(actionEl.closest('.track'), { anchor: actionEl });
             else if (action === 'collection-menu') collectionMenu(actionEl);
-            else if (action === 'collection-download') {
+            else if (action === 'collection-cache') {
                 const r = route();
                 const c = r.name === 'collection' && S.collections.find((x) => x.key === r.key);
-                if (c && c.track_ids.length) downloadZip(c.track_ids, c.name);
-                else toast('Nothing to download here yet.', 'error');
+                if (c && c.track_ids.length) cacheForOffline(c.track_ids, c.name);
+                else toast('Nothing to save here yet.', 'error');
             }
             else if (action === 'track-view') {
                 S.trackView = actionEl.dataset.view;
