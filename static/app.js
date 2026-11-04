@@ -5487,8 +5487,11 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
         else if (e.key === 'Tab') closeMenu(false);
     };
     const outside = (e) => { if (!menu.contains(e.target)) closeMenu(false); };
-    const openedAt = Date.now();
+    let openedAt = Date.now();
     const away = () => { if (Date.now() - openedAt > 500) closeMenu(false); }; // grace for open-time layout shifts on mobile
+    // A tap's own micro-scroll must not dismiss the menu before the tap lands: any press
+    // starting inside the menu renews immunity, so selecting an item always works on touch.
+    menu.addEventListener('pointerdown', () => { openedAt = Date.now(); }, true);
     menu.addEventListener('click', pick);
     menu.addEventListener('keydown', onKey);
     setTimeout(() => document.addEventListener('pointerdown', outside, true)); // not the click that opened it
