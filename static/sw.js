@@ -5,9 +5,9 @@ const ART = `${VERSION}-art`;
 const HOME = '__HOME_URL__'; // filled in by the server: the home Wi-Fi address, or empty
 const APP_SHELL = [
     '/',
-    '/static/theme.js?v=surfaces-32',
-    '/static/app.css?v=surfaces-32',
-    '/static/app.js?v=surfaces-32',
+    '/static/theme.js?v=fork-3',
+    '/static/app.css?v=fork-3',
+    '/static/app.js?v=fork-3',
     '/static/manifest.webmanifest',
     '/static/icons/icon-192.png',
     '/static/icons/icon-512.png',
