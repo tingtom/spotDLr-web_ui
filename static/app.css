@@ -1424,7 +1424,7 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: .92em; background
 .field select:focus { border-color: var(--text); }
 .check { display: flex; gap: 10px; align-items: center; cursor: pointer; }
 .check input { width: 16px; height: 16px; accent-color: var(--green); }
-.modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
 .lyrics-save { margin-top: 20px; }
 .theme-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border: 0; margin-bottom: 10px; min-width: 0; }
 .theme-choice { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-weight: 600; }
