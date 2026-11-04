@@ -3524,6 +3524,7 @@ function openSettings(focus = 'appearance') {
                     ${buildLine(S.init.build, S.init.version)}
                     <p class="about-build" id="swStatus">Checking offline support…</p>
                     <p class="about-build" id="menuLog" title="Last menu events (for debugging)">Menu: no events yet.</p>
+                    <p class="about-build" id="clientVer" title="The JavaScript this screen actually runs">App code: checking…</p>
                     <div class="field about-update">
                         <button type="button" class="pill-btn" id="checkForUpdates">Check for updates</button>
                         <button type="button" class="pill-btn" id="forceRefresh">Force refresh app files</button>
@@ -3541,6 +3542,12 @@ function openSettings(focus = 'appearance') {
     const backdrop = $('#modalRoot .modal-backdrop');
     const ml = $('#menuLog', backdrop);
     if (ml) { ml.textContent = 'Menu: ' + (M.log.length ? M.log.join(' · ') : 'no events yet.'); }
+    const cv = $('#clientVer', backdrop);
+    if (cv) {
+        const tag = (document.querySelector('script[src*="app.js"]') || {}).src || '';
+        const m = /app\.js\?v=([^&"']+)/.exec(tag);
+        cv.textContent = 'App code: ' + (m ? m[1] : 'unknown (old build?)');
+    }
     (async () => {
         const el = $('#swStatus', backdrop);
         if (!el) return;
