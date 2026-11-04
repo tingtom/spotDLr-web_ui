@@ -1,5 +1,5 @@
 // Phone app shell, artwork, and offline music cache. JSON APIs always stay on the network.
-const VERSION = 'spotdlr-phone-v39';
+const VERSION = 'spotdlr-phone-v40';
 const SHELL = `${VERSION}-shell`;
 const ART = `${VERSION}-art`;
 const MUSIC = `${VERSION}-music`;
@@ -71,6 +71,23 @@ self.addEventListener('fetch', (event) => {
             if (response.ok) caches.open(SHELL).then((cache) => cache.put(request, response.clone()));
             return response;
         })));
+        return;
+    }
+
+    if (url.pathname === '/api/library' || url.pathname.startsWith('/api/preferences/')) {
+        // Offline boot: last-known library and prefs when the server is unreachable.
+        event.respondWith((async () => {
+            const cache = await caches.open(SHELL);
+            try {
+                const response = await fetch(request);
+                if (response.ok) await cache.put(request, response.clone());
+                return response;
+            } catch {
+                const cached = await cache.match(request);
+                if (cached) return cached;
+                return new Response('null', { status: 504, headers: { 'Content-Type': 'application/json' } });
+            }
+        })());
         return;
     }
 
