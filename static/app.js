@@ -3524,6 +3524,7 @@ function openSettings(focus = 'appearance') {
                     ${buildLine(S.init.build, S.init.version)}
                     <p class="about-build" id="swStatus">Checking offline support…</p>
                     <p class="about-build" id="menuLog" title="Last menu events (for debugging)">Menu: no events yet.</p>
+                    <p class="about-build" id="audioPath" title="Live audio routing">Audio: …</p>
                     <p class="about-build" id="clientVer" title="The JavaScript this screen actually runs">App code: checking…</p>
                     <div class="field about-update">
                         <button type="button" class="pill-btn" id="checkForUpdates">Check for updates</button>
@@ -3542,6 +3543,16 @@ function openSettings(focus = 'appearance') {
     const backdrop = $('#modalRoot .modal-backdrop');
     const ml = $('#menuLog', backdrop);
     if (ml) { ml.textContent = 'Menu: ' + (M.log.length ? M.log.join(' · ') : 'no events yet.'); }
+    const al = $('#audioPath', backdrop);
+    if (al) {
+        let fx = [];
+        try {
+            if (FX.eq.on && FX.eq.gains.some(Boolean)) fx.push('EQ on');
+            if (ROOMS[FX.reverb.room]) fx.push('reverb:' + FX.reverb.room);
+            if (P.balance) fx.push('balance:' + P.balance);
+        } catch {}
+        al.textContent = `Audio: ${V.wireMode || 'direct'}${fx.length ? ' (effects: ' + fx.join(', ') + ')' : ' (no effects)'}, vol ${(P.userVolume * 100) | 0}%`;
+    }
     const cv = $('#clientVer', backdrop);
     if (cv) {
         const tag = (document.querySelector('script[src*="app.js"]') || {}).src || '';
