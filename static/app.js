@@ -3292,6 +3292,29 @@ function buildLine(build, ver) {
     return html`<p class="about-build" title="${build}">${parts.join(', ')}</p>`;
 }
 
+// Service worker updates: apply them instead of rotting on stale code. Reloads only when
+// nothing is playing or downloading; otherwise the update waits for the next launch.
+function watchForUpdates() {
+    if (!('serviceWorker' in navigator)) return;
+    const apply = (reg) => {
+        reg.addEventListener('updatefound', () => {
+            const sw = reg.installing;
+            if (!sw) return;
+            sw.addEventListener('statechange', () => {
+                if (sw.state !== 'installed' || !navigator.serviceWorker.controller) return;
+                const busy = playbackIsPlaying() || (S.jobs || []).some((j) => j.status === 'queued' || j.status === 'downloading');
+                if (busy) { toast('Update ready — restart the app to apply it.'); return; }
+                toast('Updating to the latest version…');
+                setTimeout(() => location.reload(), 1200);
+            });
+        });
+    };
+    navigator.serviceWorker.ready.then(apply).catch(() => {});
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) navigator.serviceWorker.ready.then((r) => r.update().catch(() => {})).catch(() => {});
+    });
+}
+
 // Service workers require HTTPS. Tailscale/Funnel phone links qualify; plain home-Wi-Fi HTTP does not.
 function registerPhoneCache() {
     if (S.init.on_phone && 'serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -6261,7 +6284,7 @@ async function cacheForOffline(trackIds, name) {
     }
     const musicCache = async () => {
         const keys = await caches.keys();
-        const found = keys.find((k) => /^spotdlr-phone-v\d+-music$/.test(k));
+        const found = keys.find((k) => k === 'spotdlr-music' || /^spotdlr-phone-v\d+-music$/.test(k));
         return found ? caches.open(found) : null;
     };
     const streamUrl = (t) => `/api/stream/${encodeURIComponent(t.id)}`;
@@ -6839,6 +6862,7 @@ function bindWindowCheckIn() {
     bindEvents();
     try { S.init = await api('/status/init'); } catch { S.init = { initialized: false, message: 'Server not reachable' }; }
     registerPhoneCache();
+    watchForUpdates(); // reload into new releases instead of rotting on stale code
     try { await loadLibrary(); } catch (err) { toast(`Couldn't load your library: ${err.message}`, 'error'); }
     const resumePage = restoreSession(S.init.on_phone && R.mode === 'listen' ? 'transferSession' : 'session');
     // Opening or reloading the app on Home (or no page, as the app window opens) shows the last playlist.
