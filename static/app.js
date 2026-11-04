@@ -369,13 +369,7 @@ function readyNext() {
 // dropped: the queue changed, or you went back.
 // After a swap: the player feeds the analyser, meters and volume; the spare, the crossfade's gain
 function wirePlayers() {
-    if (!V.sources) {
-        if (V.tapOnly && V.ctx && V.ctx.createMediaElementSource) { // tap follows the new player element
-            try { V.tapSource.disconnect(); } catch {}
-            try { V.tapSource = V.ctx.createMediaElementSource(P.audio); V.tapSource.connect(V.analyser); V.analyser.connect(V.ctx.destination); } catch {}
-        }
-        return; // no Web Audio (iPhone, or not built yet): nothing to rewire
-    }
+    if (!V.sources) return; // tap mode: both players are permanently tapped, nothing to rewire (iPhone: synthetic, nothing to rewire)
     for (const source of V.sources.values()) source.disconnect();
     V.sources.get(P.audio).connect(V.analyser);
     V.sources.get(XF.el).connect(xfVolume);
@@ -1852,15 +1846,62 @@ const V = {
 };
 if (!VIZ[V.mode]) V.mode = 'bars';
 
+// One MediaElementSource per element, kept for the session (creating a second one throws).
+function audioSource(el) {
+    if (!V.elemSources) V.elemSources = new Map();
+    let s = V.elemSources.get(el);
+    if (!s) { s = V.ctx.createMediaElementSource(el); V.elemSources.set(el, s); }
+    else { try { s.disconnect(); } catch {} } // re-seat: never double-connect
+    return s;
+}
+
+// Tap mode: both players feed the analyser, which passes through to the speakers.
+// Bit-transparent, no rewiring ever needed (a paused player contributes silence).
+function buildTap() {
+    const a = audioSource(P.audio), x = audioSource(XF.el);
+    try { V.analyser.disconnect(); } catch {}
+    try { xfVolume.disconnect(); } catch {} // orphaned crossfade tail must not double through the old chain
+    a.connect(V.analyser);
+    x.connect(V.analyser);
+    V.analyser.connect(V.ctx.destination);
+}
+
+// Full graph: analyser feeds the effects chain instead of the speakers directly.
+function buildFull() {
+    try { V.analyser.disconnect(); } catch {}
+    try { xfVolume.disconnect(); } catch {}
+    const a = audioSource(P.audio), x = audioSource(XF.el);
+    // Then left and right apart, each through its own meter (the Hi-Fi Deck's VU needles), and back together.
+    // Through a 2-channel gain first: a splitter takes channels as they come, so a mono song would light the
+    // left needle only (and, through the balance below, play from the left speaker only).
+    const stereo = twoChannels(V.ctx), split = V.ctx.createChannelSplitter(2), merge = V.ctx.createChannelMerger(2);
+    V.analyser.connect(stereo);
+    a.connect(V.analyser);
+    stereo.connect(split);
+    V.meters = [0, 1].map((side) => {
+        const meter = V.ctx.createAnalyser();
+        meter.fftSize = 1024;                  // 23 ms of sound per reading
+        split.connect(meter, side);
+        meter.connect(merge, 0, side);
+        return { meter, samples: new Float32Array(meter.fftSize) };
+    });
+    graphVolume = V.ctx.createGain();          // the volume, from here on (see applyVolume)
+    merge.connect(graphVolume);
+    // The crossfade's second player joins here, so the song fading out gets the effects too
+    xfVolume = V.ctx.createGain();
+    V.sources = new Map([[P.audio, a], [XF.el, x]]);
+    x.connect(xfVolume);
+    const bus = twoChannels(V.ctx);
+    graphVolume.connect(bus);
+    xfVolume.connect(bus);
+    buildSound(V.ctx, bus);                    // equalizer, reverb, balance, and on to the speakers
+}
+
 function ensureAudioGraph() {
     // Visualization without effects must not change the sound: the analyser just taps the
-    // element (pass-through node), which keeps playing straight to the speakers. The full
-    // graph is only built when an effect is actually in use, and upgraded to on demand.
-    if (V.analyser && (!V.tapOnly || !soundInUse())) return true;
-    if (V.tapOnly) { // upgrade tap -> full graph, reusing the element's one source
-        try { V.tapSource.disconnect(); V.analyser.disconnect(); } catch {}
-        V.tapOnly = false;
-    }
+    // elements (pass-through nodes), which otherwise keep playing straight to the speakers.
+    // The full graph is only built when an effect is actually in use, and upgraded to on demand.
+    if (V.analyser && V.wireMode === (soundInUse() ? 'full' : 'tap')) return true;
     if (IOS) { // never route the music through Web Audio here: it would stop when the screen locks
         V.ctx = { sampleRate: 44100, state: 'running', resume() {} };
         V.analyser = syntheticAnalyser();
@@ -1872,50 +1913,25 @@ function ensureAudioGraph() {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return false;
     try {
-        V.ctx = new AudioCtx();
-        const source = V.tapSource || V.ctx.createMediaElementSource(P.audio);
-        V.tapSource = null;
-        if (!V.analyser) {
+        if (!V.ctx) {
+            V.ctx = new AudioCtx();
             V.analyser = V.ctx.createAnalyser();
             V.analyser.fftSize = 2048;               // 1024 frequency bins, each sampleRate/2048 ≈ 21.5 Hz wide
             V.analyser.smoothingTimeConstant = 0.8;  // blend 80% of the last frame in, so bars fall smoothly
+            for (const el of [P.audio, XF.el]) el.addEventListener('play', () => V.ctx.state === 'suspended' && V.ctx.resume());
         }
-        try { source.disconnect(); } catch {} // upgrade path: re-seat the single tap connection
-        source.connect(V.analyser);
-        V.analyser.connect(V.ctx.destination); // tap passes through: element -> analyser -> speakers, bit-transparent
-        if (!soundInUse()) { // tap only: element keeps playing straight to the speakers
-            V.tapOnly = true; V.tapSource = source;
-            applyVolume();
-            return true;
+        if (!soundInUse()) {
+            buildTap();
+            V.sources = null; V.meters = null;
+            V.wireMode = 'tap';
+        } else {
+            buildFull();
+            V.wireMode = 'full';
         }
-        // Then left and right apart, each through its own meter (the Hi-Fi Deck's VU needles), and back together.
-        // Through a 2-channel gain first: a splitter takes channels as they come, so a mono song would light the
-        // left needle only (and, through the balance below, play from the left speaker only).
-        const stereo = twoChannels(V.ctx), split = V.ctx.createChannelSplitter(2), merge = V.ctx.createChannelMerger(2);
-        V.analyser.connect(stereo);
-        stereo.connect(split);
-        V.meters = [0, 1].map((side) => {
-            const meter = V.ctx.createAnalyser();
-            meter.fftSize = 1024;                  // 23 ms of sound per reading
-            split.connect(meter, side);
-            meter.connect(merge, 0, side);
-            return { meter, samples: new Float32Array(meter.fftSize) };
-        });
-        graphVolume = V.ctx.createGain();          // the volume, from here on (see applyVolume)
-        merge.connect(graphVolume);
-        // The crossfade's second player joins here, so the song fading out gets the effects too
-        xfVolume = V.ctx.createGain();
-        V.sources = new Map([[P.audio, source], [XF.el, V.ctx.createMediaElementSource(XF.el)]]);
-        V.sources.get(XF.el).connect(xfVolume);
-        const bus = twoChannels(V.ctx);
-        graphVolume.connect(bus);
-        xfVolume.connect(bus);
-        buildSound(V.ctx, bus);                    // equalizer, reverb, balance, and on to the speakers
         applyVolume();
         applySound();
         V.freq = new Uint8Array(V.analyser.frequencyBinCount);
         V.wave = new Uint8Array(V.analyser.fftSize);
-        for (const el of [P.audio, XF.el]) el.addEventListener('play', () => V.ctx.state === 'suspended' && V.ctx.resume());
         return true;
     } catch { return false; }
 }
