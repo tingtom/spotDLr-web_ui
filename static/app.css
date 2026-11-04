@@ -2297,6 +2297,8 @@ button.nv-line:hover { color: rgba(var(--fg-rgb), .8); }
 }
 .menu-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: rgba(var(--fg-rgb), .1); outline: none; }
+.menu-item:active:not(:disabled) { background: rgba(var(--fg-rgb), .22); }
+.menu { touch-action: manipulation; overscroll-behavior: contain; max-height: calc(100dvh - 16px); overflow-y: auto; }
 .menu-item:disabled { opacity: .45; cursor: default; }
 .menu-item.danger { color: var(--red); }
 .menu-heading { padding: 10px 12px 6px; font-size: 11px; font-weight: 700; color: var(--sub); }

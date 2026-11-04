@@ -5512,6 +5512,7 @@ function paintChrome() {
 const M = { opener: null, cleanup: null };
 
 function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}) {
+    if (M.cleanup && anchor && M.opener === anchor) { closeMenu(); return; } // toggle: re-tapping never falls through
     closeMenu(false);
     const root = $('#menuRoot');
     root.innerHTML = html`<div class="menu" role="menu" aria-label="${label}">${items.map((item, i) => item === '-'
@@ -5530,6 +5531,8 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
     menu.style.left = `${Math.max(8, Math.min(left, innerWidth - w - 8))}px`;
     menu.style.top = `${top}px`;
     M.opener = anchor || document.activeElement;
+    M.prevOverflow = document.documentElement.style.overflow; // lock page scroll: a scroll between touch-down and touch-up moves content under a fixed menu and misroutes the tap
+    document.documentElement.style.overflow = 'hidden';
     if (anchor) anchor.setAttribute('aria-expanded', 'true');
     const buttons = $$('.menu-item:not([disabled])', menu);
     ($('.menu-item.checked', menu) || buttons[0])?.focus({ preventScroll: true });
@@ -5563,6 +5566,7 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
         document.removeEventListener('pointerdown', outside, true);
         window.removeEventListener('resize', away);
         document.removeEventListener('scroll', away, true);
+        document.documentElement.style.overflow = M.prevOverflow || '';
     };
 }
 
