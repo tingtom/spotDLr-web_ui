@@ -1,5 +1,5 @@
 // Phone app shell, artwork, and offline music cache. JSON APIs always stay on the network.
-const VERSION = 'spotdlr-phone-v38';
+const VERSION = 'spotdlr-phone-v39';
 const SHELL = `${VERSION}-shell`;
 const ART = `${VERSION}-art`;
 const MUSIC = `${VERSION}-music`;
@@ -7,9 +7,9 @@ const MUSIC_LIMIT = 500; // tracks; oldest evicted first
 const HOME = '__HOME_URL__'; // filled in by the server: the home Wi-Fi address, or empty
 const APP_SHELL = [
     '/',
-    '/static/theme.js?v=fork-3',
-    '/static/app.css?v=fork-3',
-    '/static/app.js?v=fork-3',
+    '/static/theme.js?v=fork-4',
+    '/static/app.css?v=fork-4',
+    '/static/app.js?v=fork-4',
     '/static/manifest.webmanifest',
     '/static/icons/icon-192.png',
     '/static/icons/icon-512.png',
