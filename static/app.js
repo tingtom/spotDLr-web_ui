@@ -6195,33 +6195,91 @@ function downloadZip(trackIds, name) {
 }
 
 async function cacheForOffline(trackIds, name) {
-    // Pre-loads every song through the service worker so the playlist keeps
-    // playing with no connection. Already-cached songs are skipped fast.
+    // Pre-loads the playlist onto this device for offline play, with cancel,
+    // per-playlist status, and a clear button. Needs an active service worker.
     const tracks = trackIds.map((id) => S.byId.get(id)).filter(Boolean);
     if (!tracks.length) return;
-    let done = 0, failed = 0;
+    if (!navigator.serviceWorker?.controller) {
+        toast('Offline mode is still activating — reload the page once, then retry.', 'error');
+        return;
+    }
+    const musicCache = async () => {
+        const keys = await caches.keys();
+        const found = keys.find((k) => /^spotdlr-phone-v\d+-music$/.test(k));
+        return found ? caches.open(found) : null;
+    };
+    const streamUrl = (t) => `/api/stream/${encodeURIComponent(t.id)}`;
+    let cancelled = false;
     openModal({
         title: `Offline: ${name}`,
-        body: html`<p class="dialog-note">Downloading ${plural(tracks.length, 'song')} into this device for offline play. Keep this page open.</p>
+        body: html`<p class="dialog-note" id="offSummary">Checking what's already saved…</p>
             <div class="upload-progress"><div class="progress-bar"><i style="width:0%"></i></div>
-            <p id="offlineStatus">Starting…</p></div>
-            <div class="modal-actions"><button type="button" class="pill-btn" data-close>Close</button></div>`,
+            <p id="offlineStatus"></p></div>
+            <div class="modal-actions"><button type="button" class="pill-btn primary" id="offGo">Download missing</button><button type="button" class="pill-btn" id="offClear">Remove offline copies</button><button type="button" class="pill-btn" data-close id="offClose">Close</button></div>`,
+        onOpen: (modal) => {
+            const summary = $('#offSummary', modal), bar = $('.progress-bar i', modal),
+                status = $('#offlineStatus', modal), go = $('#offGo', modal),
+                clear = $('#offClear', modal), close = $('#offClose', modal);
+            let cached = new Set();
+            const paint = async () => {
+                cached = new Set();
+                const cache = await musicCache();
+                if (cache) {
+                    await Promise.all(tracks.map(async (t) => {
+                        try { if (await cache.match(streamUrl(t))) cached.add(t.id); } catch { /* ignore */ }
+                    }));
+                }
+                summary.textContent = cached.size === tracks.length ? `All ${plural(tracks.length, 'song')} saved on this device.` :
+                    cached.size ? `${cached.size} of ${tracks.length} already on this device.` :
+                    `${plural(tracks.length, 'song')}, none saved yet.`;
+                bar.style.width = `${Math.round((cached.size / tracks.length) * 100)}%`;
+                return cache;
+            };
+            const setBusy = (busy) => { [go, clear].forEach((b) => { b.disabled = busy; }); };
+            go.addEventListener('click', async () => {
+                cancelled = false;
+                setBusy(true);
+                go.textContent = 'Cancel';
+                go.disabled = false;
+                const controller = new AbortController();
+                go.onclick = () => { cancelled = true; controller.abort(); };
+                let done = 0, failed = 0;
+                const missing = tracks.filter((t) => !cached.has(t.id));
+                for (const t of missing) {
+                    if (cancelled) break;
+                    status.textContent = `Saving ${done + 1} of ${missing.length}…`;
+                    try {
+                        const r = await fetch(streamUrl(t), { signal: controller.signal });
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        await r.blob();
+                    } catch { if (!cancelled) failed++; }
+                    done++;
+                    bar.style.width = `${Math.round(((cached.size + done) / tracks.length) * 100)}%`;
+                }
+                await paint();
+                status.textContent = cancelled ? `Stopped after ${done} of ${missing.length}.` :
+                    failed ? `Done with ${failed} failed.` : `Done: ${plural(tracks.length, 'song')} ready offline.`;
+                toast(cancelled ? 'Offline download cancelled.' : failed ? `Offline cache: ${failed} failed.` : `${plural(tracks.length, 'song')} ready offline.`, (cancelled || failed) ? 'error' : '');
+                go.textContent = 'Download missing';
+                go.onclick = null;
+                setBusy(false);
+            });
+            clear.addEventListener('click', async () => {
+                setBusy(true);
+                status.textContent = 'Removing…';
+                try {
+                    const cache = await musicCache();
+                    if (cache) await Promise.all(tracks.map((t) => cache.delete(streamUrl(t)).catch(() => false)));
+                } catch { /* ignore */ }
+                await paint();
+                status.textContent = 'Offline copies removed.';
+                setBusy(false);
+            });
+            close.addEventListener('click', () => { cancelled = true; });
+            paint();
+        },
     });
-    const bar = $('.progress-bar i'), status = $('#offlineStatus');
-    for (const t of tracks) {
-        try {
-            const cached = await caches.match(`/api/stream/${encodeURIComponent(t.id)}`);
-            if (!cached) await (await fetch(`/api/stream/${encodeURIComponent(t.id)}`)).blob();
-        } catch { failed++; }
-        done++;
-        if (bar) bar.style.width = `${Math.round((done / tracks.length) * 100)}%`;
-        if (status) status.textContent = failed ? `${done} of ${tracks.length} (${failed} failed)…` : `${done} of ${tracks.length}…`;
-    }
-    if (bar) bar.style.width = '100%';
-    if (status) status.textContent = failed ? `Done with ${failed} failed.` : `Done: ${plural(tracks.length, 'song')} ready offline.`;
-    toast(failed ? `Offline cache: ${failed} failed.` : `${plural(tracks.length, 'song')} ready offline.`, failed ? 'error' : '');
 }
-
 async function saveToFolder(trackIds, name) {    // Writes MP3s straight into a folder the user picks (e.g. a USB stick).
     // Needs a secure context (localhost or HTTPS); otherwise the menu item is hidden.
     const tracks = trackIds.map((id) => S.byId.get(id)).filter((t) => t && t.path);
