@@ -5240,6 +5240,7 @@ function route() {
         case 'stats': return { name: 'stats' };
         case 'tidy': return { name: 'tidy' };
         case 'library': return { name: 'library' };
+        case 'settings': return { name: 'settings' };
         case 'schedules': return { name: 'schedules' };
         case 'genre': return { name: 'genre', genre: parts.join('/') };
         default: return { name: 'home' };
@@ -5287,6 +5288,7 @@ async function render({ keepScroll = false } = {}) {
         case 'library': content = viewLibrary(); break;
         case 'schedules': content = await viewSchedules(); break;
         case 'genre': content = viewGenre(r.genre); break;
+        case 'settings': content = viewHome(); break; // modal opens below; type #/settings in the address bar if menus are unreachable
         default: content = viewHome();
     }
     if (seq !== renderSeq) return; // a newer navigation won
@@ -5328,6 +5330,7 @@ async function render({ keepScroll = false } = {}) {
     highlightSidebar();
     markPlaying();
     updateControls();
+    if (r.name === 'settings') { history.replaceState(null, '#/'); openSettings(); } // direct link; replaceState avoids re-open loops
 }
 const rerender = () => render({ keepScroll: true });
 
