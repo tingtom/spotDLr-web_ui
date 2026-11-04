@@ -369,7 +369,13 @@ function readyNext() {
 // dropped: the queue changed, or you went back.
 // After a swap: the player feeds the analyser, meters and volume; the spare, the crossfade's gain
 function wirePlayers() {
-    if (!V.sources) return; // no Web Audio (iPhone, or not built yet): nothing to rewire
+    if (!V.sources) {
+        if (V.tapOnly && V.ctx && V.ctx.createMediaElementSource) { // tap follows the new player element
+            try { V.tapSource.disconnect(); } catch {}
+            try { V.tapSource = V.ctx.createMediaElementSource(P.audio); V.tapSource.connect(V.analyser); } catch {}
+        }
+        return; // no Web Audio (iPhone, or not built yet): nothing to rewire
+    }
     for (const source of V.sources.values()) source.disconnect();
     V.sources.get(P.audio).connect(V.analyser);
     V.sources.get(XF.el).connect(xfVolume);
@@ -1847,7 +1853,14 @@ const V = {
 if (!VIZ[V.mode]) V.mode = 'bars';
 
 function ensureAudioGraph() {
-    if (V.analyser) return true;
+    // Visualization without effects must not change the sound: the analyser just taps the
+    // element (pass-through node), which keeps playing straight to the speakers. The full
+    // graph is only built when an effect is actually in use, and upgraded to on demand.
+    if (V.analyser && (!V.tapOnly || !soundInUse())) return true;
+    if (V.tapOnly) { // upgrade tap -> full graph, reusing the element's one source
+        try { V.tapSource.disconnect(); } catch {}
+        V.tapOnly = false;
+    }
     if (IOS) { // never route the music through Web Audio here: it would stop when the screen locks
         V.ctx = { sampleRate: 44100, state: 'running', resume() {} };
         V.analyser = syntheticAnalyser();
@@ -1860,11 +1873,20 @@ function ensureAudioGraph() {
     if (!AudioCtx) return false;
     try {
         V.ctx = new AudioCtx();
-        const source = V.ctx.createMediaElementSource(P.audio);
-        V.analyser = V.ctx.createAnalyser();
-        V.analyser.fftSize = 2048;               // 1024 frequency bins, each sampleRate/2048 ≈ 21.5 Hz wide
-        V.analyser.smoothingTimeConstant = 0.8;  // blend 80% of the last frame in, so bars fall smoothly
+        const source = V.tapSource || V.ctx.createMediaElementSource(P.audio);
+        V.tapSource = null;
+        if (!V.analyser) {
+            V.analyser = V.ctx.createAnalyser();
+            V.analyser.fftSize = 2048;               // 1024 frequency bins, each sampleRate/2048 ≈ 21.5 Hz wide
+            V.analyser.smoothingTimeConstant = 0.8;  // blend 80% of the last frame in, so bars fall smoothly
+        }
+        try { source.disconnect(); } catch {} // upgrade path: re-seat the single tap connection
         source.connect(V.analyser);
+        if (!soundInUse()) { // tap only: element keeps playing straight to the speakers
+            V.tapOnly = true; V.tapSource = source;
+            applyVolume();
+            return true;
+        }
         // Then left and right apart, each through its own meter (the Hi-Fi Deck's VU needles), and back together.
         // Through a 2-channel gain first: a splitter takes channels as they come, so a mono song would light the
         // left needle only (and, through the balance below, play from the left speaker only).
