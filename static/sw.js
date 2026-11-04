@@ -1,5 +1,5 @@
 // Phone app shell, artwork, and offline music cache. JSON APIs always stay on the network.
-const VERSION = 'spotdlr-phone-v37';
+const VERSION = 'spotdlr-phone-v38';
 const SHELL = `${VERSION}-shell`;
 const ART = `${VERSION}-art`;
 const MUSIC = `${VERSION}-music`;
