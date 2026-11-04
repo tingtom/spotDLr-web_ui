@@ -1938,6 +1938,12 @@ function ensureAudioGraph() {
             V.analyser.fftSize = 2048;               // 1024 frequency bins, each sampleRate/2048 ≈ 21.5 Hz wide
             V.analyser.smoothingTimeConstant = 0.8;  // blend 80% of the last frame in, so bars fall smoothly
             for (const el of [P.audio, XF.el]) el.addEventListener('play', () => V.ctx.state === 'suspended' && V.ctx.resume());
+            if (!V.kickArmed) { // contexts built outside a gesture start suspended: wake on the next one
+                V.kickArmed = true;
+                const kick = () => { try { if (V.ctx && V.ctx.state === 'suspended') V.ctx.resume().catch(() => {}); } catch {} };
+                ['pointerdown', 'pointerup', 'keydown', 'touchend'].forEach((t) => document.addEventListener(t, kick, true));
+                kick();
+            }
         }
         if (!soundInUse()) {
             buildTap();
