@@ -5487,7 +5487,8 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
         else if (e.key === 'Tab') closeMenu(false);
     };
     const outside = (e) => { if (!menu.contains(e.target)) closeMenu(false); };
-    const away = () => closeMenu(false);
+    const openedAt = Date.now();
+    const away = () => { if (Date.now() - openedAt > 500) closeMenu(false); }; // grace for open-time layout shifts on mobile
     menu.addEventListener('click', pick);
     menu.addEventListener('keydown', onKey);
     setTimeout(() => document.addEventListener('pointerdown', outside, true)); // not the click that opened it
