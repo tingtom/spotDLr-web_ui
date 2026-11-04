@@ -3519,6 +3519,7 @@ function openSettings(focus = 'appearance') {
                 <section class="modal-section about" role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about" ${initialTab === 'about' ? '' : new Safe('hidden')} tabindex="0">
                     <div class="about-name">${icon('spotDLr', 20)}<strong>spotDLr</strong><span class="about-version">${S.init.version ? `Version ${S.init.version}` : ''}</span></div>
                     ${buildLine(S.init.build, S.init.version)}
+                    <p class="about-build" id="swStatus">Checking offline support…</p>
                     <div class="field about-update">
                         <button type="button" class="pill-btn" id="checkForUpdates">Check for updates</button>
                         <button type="button" class="pill-btn" id="forceRefresh">Force refresh app files</button>
@@ -3534,6 +3535,26 @@ function openSettings(focus = 'appearance') {
 
     // Listeners go on the backdrop, which is thrown away on close, so they never pile up
     const backdrop = $('#modalRoot .modal-backdrop');
+    (async () => {
+        const el = $('#swStatus', backdrop);
+        if (!el) return;
+        if (!('serviceWorker' in navigator)) { el.textContent = 'Offline: not supported by this browser.'; return; }
+        let ver = '?';
+        try {
+            const text = await (await fetch('/sw.js', { cache: 'no-store' })).text();
+            const m = /spotdlr-phone-v(\d+)/.exec(text);
+            if (m) ver = `v${m[1]}`;
+        } catch { /* offline: fall through to cache inspection */ }
+        let songs = 0, controlled = !!(navigator.serviceWorker.controller);
+        try {
+            const keys = await caches.keys();
+            const found = keys.find((k) => k === 'spotdlr-music' || /^spotdlr-phone-v\d+-music$/.test(k));
+            if (found) songs = (await caches.open(found).then((c) => c.keys())).length;
+        } catch { /* no cache access */ }
+        el.textContent = controlled
+            ? `Offline: worker ${ver} active, ${songs} song${songs === 1 ? '' : 's'} cached on this device.`
+            : `Offline: worker not in control (served ${ver}). Reload once on this address, then retry.`;
+    })();
     const opener = document.activeElement;
     const close = () => { $('#modalRoot').innerHTML = ''; if (opener && opener.focus) opener.focus(); };
     backdrop.addEventListener('click', (e) => { if (e.target.closest('[data-close]') && (e.target === backdrop || e.target.closest('button[data-close], a[data-close]'))) close(); });
