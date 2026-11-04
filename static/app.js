@@ -5457,7 +5457,7 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
     M.opener = anchor || document.activeElement;
     if (anchor) anchor.setAttribute('aria-expanded', 'true');
     const buttons = $$('.menu-item:not([disabled])', menu);
-    ($('.menu-item.checked', menu) || buttons[0])?.focus();
+    ($('.menu-item.checked', menu) || buttons[0])?.focus({ preventScroll: true });
 
     const pick = (e) => {
         const btn = e.target.closest('.menu-item');
