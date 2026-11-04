@@ -24,6 +24,9 @@ async function api(path, options = {}) {
     return data;
 }
 
+window.addEventListener('error', (e) => { try { toast(`Error: ${(e.message || e.error || 'unknown').toString().slice(0, 160)}`, 'error'); } catch {} });
+window.addEventListener('unhandledrejection', (e) => { try { toast(`Error: ${String((e.reason && e.reason.message) || e.reason || 'unknown').slice(0, 160)}`, 'error'); } catch {} });
+
 let preferenceSyncTimer;
 function syncClientPreferences() {
     clearTimeout(preferenceSyncTimer);
@@ -3520,6 +3523,7 @@ function openSettings(focus = 'appearance') {
                     <div class="about-name">${icon('spotDLr', 20)}<strong>spotDLr</strong><span class="about-version">${S.init.version ? `Version ${S.init.version}` : ''}</span></div>
                     ${buildLine(S.init.build, S.init.version)}
                     <p class="about-build" id="swStatus">Checking offline support…</p>
+                    <p class="about-build" id="menuLog" title="Last menu events (for debugging)">Menu: no events yet.</p>
                     <div class="field about-update">
                         <button type="button" class="pill-btn" id="checkForUpdates">Check for updates</button>
                         <button type="button" class="pill-btn" id="forceRefresh">Force refresh app files</button>
@@ -3535,6 +3539,8 @@ function openSettings(focus = 'appearance') {
 
     // Listeners go on the backdrop, which is thrown away on close, so they never pile up
     const backdrop = $('#modalRoot .modal-backdrop');
+    const ml = $('#menuLog', backdrop);
+    if (ml) { ml.textContent = 'Menu: ' + (M.log.length ? M.log.join(' · ') : 'no events yet.'); }
     (async () => {
         const el = $('#swStatus', backdrop);
         if (!el) return;
@@ -5530,10 +5536,12 @@ function paintChrome() {
 // One menu at a time, in #menuRoot. Keyboard: ↑/↓/Home/End move, Enter/Space pick, Esc closes and returns
 // focus to the button that opened it; any click outside, Tab, scrolling or resizing closes it.
 
-const M = { opener: null, cleanup: null };
+const M = { opener: null, cleanup: null, log: [] };
+const menuEvent = (what) => { M.log.push(`${new Date().toLocaleTimeString()}: ${what}`); M.log = M.log.slice(-8); };
 
 function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}) {
-    if (M.cleanup && anchor && M.opener === anchor) { closeMenu(); return; } // toggle: re-tapping never falls through
+    menuEvent(`open ${label}`);
+    if (M.cleanup && anchor && M.opener === anchor) { closeMenu(); menuEvent('toggle-shut'); return; } // toggle: re-tapping never falls through
     closeMenu(false);
     const root = $('#menuRoot');
     root.innerHTML = html`<div class="menu" role="menu" aria-label="${label}">${items.map((item, i) => item === '-'
@@ -5562,8 +5570,9 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
         const btn = e.target.closest('.menu-item');
         if (!btn || btn.disabled) return;
         const item = items[+btn.dataset.menuIndex];
+        menuEvent(`pick:${item.label || btn.dataset.menuIndex}`);
         closeMenu(false);
-        item.run();
+        try { item.run(); } catch (err) { toast(`Couldn't open: ${err && err.message || err}`, 'error'); }
     };
     const onKey = (e) => {
         const i = buttons.indexOf(document.activeElement);
@@ -5572,9 +5581,9 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
         else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); buttons[e.key === 'Home' ? 0 : buttons.length - 1].focus(); }
         else if (e.key === 'Tab') closeMenu(false);
     };
-    const outside = (e) => { if (!menu.contains(e.target)) closeMenu(false); };
+    const outside = (e) => { if (!menu.contains(e.target)) { menuEvent('close:tap-outside'); closeMenu(false); } };
     let openedAt = Date.now();
-    const away = () => { if (Date.now() - openedAt > 500) closeMenu(false); }; // grace for open-time layout shifts on mobile
+    const away = () => { if (Date.now() - openedAt > 500) { menuEvent('close:scroll/resize'); closeMenu(false); } }; // grace for open-time layout shifts on mobile
     // A tap's own micro-scroll must not dismiss the menu before the tap lands: any press
     // starting inside the menu renews immunity, so selecting an item always works on touch.
     menu.addEventListener('pointerdown', () => { openedAt = Date.now(); }, true);
