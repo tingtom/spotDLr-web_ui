@@ -1864,6 +1864,7 @@ function buildTap() {
     const a = audioSource(P.audio), x = audioSource(XF.el);
     try { V.analyser.disconnect(); } catch {}
     try { xfVolume.disconnect(); } catch {} // orphaned crossfade tail must not double through the old chain
+    graphVolume = null; xfVolume = null; // stale gains must not hijack applyVolume
     a.connect(V.analyser);
     x.connect(V.analyser);
     V.analyser.connect(V.ctx.destination);
@@ -1900,10 +1901,25 @@ function buildFull() {
     buildSound(V.ctx, bus);                    // equalizer, reverb, balance, and on to the speakers
 }
 
+// Nuclear option for devices where Web Audio itself changes the level: tear it all down
+// and play straight from the elements (visualizer goes flat). Toggle from About.
+function bypassWebAudio(on) {
+    V.bypassed = !!on;
+    if (on) {
+        try { V.ctx && V.ctx.close && V.ctx.close(); } catch {}
+        V.ctx = null; V.analyser = null; V.sources = null; V.meters = null;
+        V.tapOnly = false; V.tapSource = null; V.elemSources = null; V.wireMode = null;
+        try { graphVolume = null; } catch {}
+        try { xfVolume = null; } catch {}
+        applyVolume();
+    }
+}
+
 function ensureAudioGraph() {
     // Visualization without effects must not change the sound: the analyser just taps the
     // elements (pass-through nodes), which otherwise keep playing straight to the speakers.
     // The full graph is only built when an effect is actually in use, and upgraded to on demand.
+    if (V.bypassed) return false;
     if (V.analyser && V.wireMode === (soundInUse() ? 'full' : 'tap')) return true;
     if (IOS) { // never route the music through Web Audio here: it would stop when the screen locks
         V.ctx = { sampleRate: 44100, state: 'running', resume() {} };
@@ -3525,6 +3541,7 @@ function openSettings(focus = 'appearance') {
                     <p class="about-build" id="swStatus">Checking offline support…</p>
                     <p class="about-build" id="menuLog" title="Last menu events (for debugging)">Menu: no events yet.</p>
                     <p class="about-build" id="audioPath" title="Live audio routing">Audio: …</p>
+                    <p class="about-build"><button type="button" class="link" id="audioBypass">Use direct audio (disables visualizer analysis)</button></p>
                     <p class="about-build" id="clientVer" title="The JavaScript this screen actually runs">App code: checking…</p>
                     <div class="field about-update">
                         <button type="button" class="pill-btn" id="checkForUpdates">Check for updates</button>
@@ -3552,6 +3569,11 @@ function openSettings(focus = 'appearance') {
             if (P.balance) fx.push('balance:' + P.balance);
         } catch {}
         al.textContent = `Audio: ${V.wireMode || 'direct'}${fx.length ? ' (effects: ' + fx.join(', ') + ')' : ' (no effects)'}, vol ${(P.userVolume * 100) | 0}%`;
+        const bb = $('#audioBypass', backdrop);
+        if (bb) {
+            bb.textContent = V.bypassed ? 'Re-enable Web Audio (restores visualizer analysis)' : 'Use direct audio (disables visualizer analysis)';
+            bb.onclick = () => { bypassWebAudio(!V.bypassed); close(); toast(V.bypassed ? 'Direct audio on.' : 'Web Audio restored.'); };
+        }
     }
     const cv = $('#clientVer', backdrop);
     if (cv) {
