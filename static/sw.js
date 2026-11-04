@@ -1,7 +1,9 @@
-// Phone app shell and artwork cache. Music streams and JSON APIs always stay on the network.
-const VERSION = 'spotdlr-phone-v36';
+// Phone app shell, artwork, and offline music cache. JSON APIs always stay on the network.
+const VERSION = 'spotdlr-phone-v37';
 const SHELL = `${VERSION}-shell`;
 const ART = `${VERSION}-art`;
+const MUSIC = `${VERSION}-music`;
+const MUSIC_LIMIT = 500; // tracks; oldest evicted first
 const HOME = '__HOME_URL__'; // filled in by the server: the home Wi-Fi address, or empty
 const APP_SHELL = [
     '/',
@@ -69,5 +71,46 @@ self.addEventListener('fetch', (event) => {
             if (response.ok) caches.open(SHELL).then((cache) => cache.put(request, response.clone()));
             return response;
         })));
+        return;
+    }
+
+    if (url.pathname.startsWith('/api/stream/')) {
+        // Offline music: full downloads are cached; range (seek) requests are
+        // sliced out of the cached full file. Uncached + offline just fails
+        // and the player skips to the next song.
+        event.respondWith((async () => {
+            const key = url.pathname + url.search;
+            const cache = await caches.open(MUSIC);
+            const range = request.headers.get('range');
+            if (range) {
+                const full = await cache.match(key);
+                if (full) {
+                    const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+                    const buf = await full.arrayBuffer();
+                    const start = match ? +match[1] : 0;
+                    const end = match && match[2] !== '' ? Math.min(+match[2], buf.byteLength - 1) : buf.byteLength - 1;
+                    if (start >= buf.byteLength) return new Response(null, { status: 416 });
+                    const type = full.headers.get('Content-Type') || 'audio/mpeg';
+                    return new Response(buf.slice(start, end + 1), {
+                        status: 206,
+                        headers: { 'Content-Type': type, 'Content-Length': String(end - start + 1), 'Content-Range': `bytes ${start}-${end}/${buf.byteLength}`, 'Accept-Ranges': 'bytes' },
+                    });
+                }
+                return fetch(request);
+            }
+            const cached = await cache.match(key);
+            if (cached) return cached;
+            try {
+                const response = await fetch(request);
+                if (response.ok && response.status === 200) {
+                    await cache.put(key, response.clone());
+                    trim(MUSIC, MUSIC_LIMIT);
+                }
+                return response;
+            } catch {
+                return new Response(null, { status: 504 });
+            }
+        })());
+        return;
     }
 });

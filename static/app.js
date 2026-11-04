@@ -5542,6 +5542,7 @@ function collectionMenu(anchor) {
         { label: 'Add to another playlist', icon: 'listAdd', disabled: !ids.length, run: () => addToPlaylistDialog(ids, name) },
         { label: 'Send to device', icon: 'usb', disabled: !ids.length, run: () => sendToDeviceDialog(ids, name, name) },
         { label: 'Download as ZIP', icon: 'download', disabled: !ids.length, run: () => downloadZip(ids, name) },
+        ...(('serviceWorker' in navigator && 'caches' in window) ? [{ label: 'Make available offline', icon: 'download', disabled: !ids.length, run: () => cacheForOffline(ids, name) }] : []),
         ...(window.showDirectoryPicker ? [{ label: 'Save to USB / folder…', icon: 'usb', disabled: !ids.length, run: () => saveToFolder(ids, name) }] : []),
         ...(c && !S.init.on_phone ? [{ label: 'Open folder', icon: 'folder', run: () => openLibraryLocation({ collection_key: c.key }) }] : []),
         ...(S.init.apple_music ? [{ label: 'Add to Apple Music', icon: 'apple', disabled: !ids.length, run: () => appleMusicDialog(ids, name, name, !(c && c.kind === 'album')) }] : []),
@@ -6187,8 +6188,35 @@ function downloadZip(trackIds, name) {
         .catch((error) => toast(error.message, 'error'));
 }
 
-async function saveToFolder(trackIds, name) {
-    // Writes MP3s straight into a folder the user picks (e.g. a USB stick).
+async function cacheForOffline(trackIds, name) {
+    // Pre-loads every song through the service worker so the playlist keeps
+    // playing with no connection. Already-cached songs are skipped fast.
+    const tracks = trackIds.map((id) => S.byId.get(id)).filter(Boolean);
+    if (!tracks.length) return;
+    let done = 0, failed = 0;
+    openModal({
+        title: `Offline: ${name}`,
+        body: html`<p class="dialog-note">Downloading ${plural(tracks.length, 'song')} into this device for offline play. Keep this page open.</p>
+            <div class="upload-progress"><div class="progress-bar"><i style="width:0%"></i></div>
+            <p id="offlineStatus">Starting…</p></div>
+            <div class="modal-actions"><button type="button" class="pill-btn" data-close>Close</button></div>`,
+    });
+    const bar = $('.progress-bar i'), status = $('#offlineStatus');
+    for (const t of tracks) {
+        try {
+            const cached = await caches.match(`/api/stream/${encodeURIComponent(t.id)}`);
+            if (!cached) await (await fetch(`/api/stream/${encodeURIComponent(t.id)}`)).blob();
+        } catch { failed++; }
+        done++;
+        if (bar) bar.style.width = `${Math.round((done / tracks.length) * 100)}%`;
+        if (status) status.textContent = failed ? `${done} of ${tracks.length} (${failed} failed)…` : `${done} of ${tracks.length}…`;
+    }
+    if (bar) bar.style.width = '100%';
+    if (status) status.textContent = failed ? `Done with ${failed} failed.` : `Done: ${plural(tracks.length, 'song')} ready offline.`;
+    toast(failed ? `Offline cache: ${failed} failed.` : `${plural(tracks.length, 'song')} ready offline.`, failed ? 'error' : '');
+}
+
+async function saveToFolder(trackIds, name) {    // Writes MP3s straight into a folder the user picks (e.g. a USB stick).
     // Needs a secure context (localhost or HTTPS); otherwise the menu item is hidden.
     const tracks = trackIds.map((id) => S.byId.get(id)).filter((t) => t && t.path);
     if (!tracks.length) { toast('Nothing saved yet — download the songs first.', 'error'); return; }
