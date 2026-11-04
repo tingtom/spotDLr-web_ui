@@ -3574,7 +3574,8 @@ function openSettings(focus = 'appearance') {
             if (ROOMS[FX.reverb.room]) fx.push('reverb:' + FX.reverb.room);
             if (P.balance) fx.push('balance:' + P.balance);
         } catch {}
-        al.textContent = `Audio: ${V.wireMode || 'direct'}${fx.length ? ' (effects: ' + fx.join(', ') + ')' : ' (no effects)'}, vol ${(P.userVolume * 100) | 0}%`;
+        al.textContent = `Audio: ${V.wireMode || 'direct'}${fx.length ? ' (effects: ' + fx.join(', ') + ')' : ' (no effects)'}, vol ${(P.userVolume * 100) | 0}%` +
+            ` [gains tg=${(+P.trackGain).toFixed(2)} fi=${(+P.fadeIn).toFixed(2)} sl=${(+P.sleepGain).toFixed(2)} wk=${(+P.wakeGain).toFixed(2)} el=${(+P.audio.volume).toFixed(2)}${P.audio.muted ? ' MUTED' : ''}${V.ctx ? (V.ctx.state || '') : ' noctx'}]`;
         const bb = $('#audioBypass', backdrop);
         if (bb) {
             bb.textContent = V.bypassed ? 'Re-enable Web Audio (restores visualizer analysis)' : 'Use direct audio (disables visualizer analysis)';
