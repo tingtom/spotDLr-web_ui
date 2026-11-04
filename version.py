@@ -21,6 +21,13 @@ def source_build():
     "v2.0.1-3-gabc1234" (3 commits after it), "-dirty" (uncommitted changes). None in the installed app."""
     if getattr(sys, "frozen", False):
         return None
+    fork_build = Path(__file__).parent / ".fork-build"
+    try:
+        sha = fork_build.read_text(encoding="utf-8").strip()
+        if sha:
+            return f"fork-{sha}"
+    except OSError:
+        pass
     # Re-checked every 30 s, not once per run: committing while spotDLr runs must clear "unsaved edits"
     if time.monotonic() - _build_cache["at"] < 30:
         return _build_cache["value"]

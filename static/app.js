@@ -3459,6 +3459,7 @@ function openSettings(focus = 'appearance') {
                     ${buildLine(S.init.build, S.init.version)}
                     <div class="field about-update">
                         <button type="button" class="pill-btn" id="checkForUpdates">Check for updates</button>
+                        <button type="button" class="pill-btn" id="forceRefresh">Force refresh app files</button>
                         <small id="updateStatus" role="status"></small>
                     </div>
                     <a class="link about-link" href="https://github.com/HoldenGrant/spotDLr-web_ui/blob/main/CHANGELOG.md" target="_blank" rel="noopener">What's new</a>
@@ -3516,6 +3517,18 @@ function openSettings(focus = 'appearance') {
         } finally {
             button.disabled = false;
         }
+    });
+
+    $('#forceRefresh', backdrop)?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const status = $('#updateStatus', backdrop);
+        button.disabled = true;
+        status.textContent = 'Clearing cached files…';
+        try {
+            if ('serviceWorker' in navigator) await Promise.all((await navigator.serviceWorker.getRegistrations()).map((r) => r.unregister()));
+            if ('caches' in window) await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+        } catch { /* reload anyway */ }
+        location.reload();
     });
 
     const tabButtons = $$('[data-settings-tab]', backdrop);
