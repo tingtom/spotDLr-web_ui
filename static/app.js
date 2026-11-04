@@ -372,7 +372,7 @@ function wirePlayers() {
     if (!V.sources) {
         if (V.tapOnly && V.ctx && V.ctx.createMediaElementSource) { // tap follows the new player element
             try { V.tapSource.disconnect(); } catch {}
-            try { V.tapSource = V.ctx.createMediaElementSource(P.audio); V.tapSource.connect(V.analyser); } catch {}
+            try { V.tapSource = V.ctx.createMediaElementSource(P.audio); V.tapSource.connect(V.analyser); V.analyser.connect(V.ctx.destination); } catch {}
         }
         return; // no Web Audio (iPhone, or not built yet): nothing to rewire
     }
@@ -1858,7 +1858,7 @@ function ensureAudioGraph() {
     // graph is only built when an effect is actually in use, and upgraded to on demand.
     if (V.analyser && (!V.tapOnly || !soundInUse())) return true;
     if (V.tapOnly) { // upgrade tap -> full graph, reusing the element's one source
-        try { V.tapSource.disconnect(); } catch {}
+        try { V.tapSource.disconnect(); V.analyser.disconnect(); } catch {}
         V.tapOnly = false;
     }
     if (IOS) { // never route the music through Web Audio here: it would stop when the screen locks
@@ -1882,6 +1882,7 @@ function ensureAudioGraph() {
         }
         try { source.disconnect(); } catch {} // upgrade path: re-seat the single tap connection
         source.connect(V.analyser);
+        V.analyser.connect(V.ctx.destination); // tap passes through: element -> analyser -> speakers, bit-transparent
         if (!soundInUse()) { // tap only: element keeps playing straight to the speakers
             V.tapOnly = true; V.tapSource = source;
             applyVolume();
