@@ -3715,11 +3715,14 @@ function openSettings(focus = 'appearance') {
         if (!el) return;
         if (!('serviceWorker' in navigator)) { el.textContent = 'Offline: not supported by this browser.'; return; }
         let ver = '?';
-        try {
-            const text = await (await fetch('/sw.js', { cache: 'no-store' })).text();
-            const m = /spotdlr-phone-v(\d+)/.exec(text);
+        try { // race a DNS-stalling network: offline must never freeze this line
+            const text = await Promise.race([
+                fetch('/sw.js', { cache: 'no-store' }).then((r) => r.text()).catch(() => null),
+                new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+            ]);
+            const m = text && /spotdlr-phone-v(\d+)/.exec(text);
             if (m) ver = `v${m[1]}`;
-        } catch { /* offline: fall through to cache inspection */ }
+        } catch { /* offline: keep '?' */ }
         let songs = 0, controlled = !!(navigator.serviceWorker.controller);
         try {
             const keys = await caches.keys();
