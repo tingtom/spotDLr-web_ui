@@ -6994,11 +6994,12 @@ function bindWindowCheckIn() {
 }
 
 (async function boot() {
-    // Ask to be exempt from storage eviction: a big offline music cache otherwise gives Chrome
-    // permission to wipe the whole origin (worker included) under disk pressure.
-    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch { /* unsupported */ }
+    paintChrome(); // first: paint before anything that can stall
     bindWindowCheckIn();
-    paintChrome();
+    // Ask to be exempt from storage eviction: a big offline music cache otherwise gives Chrome
+    // permission to wipe the whole origin (worker included) under disk pressure. Never awaited —
+    // a stalled prompt must not hold the app behind the launch screen.
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch { /* unsupported */ }
     bindFileDrop();
     bindImageFallback();
     bindChartTooltip();

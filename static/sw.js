@@ -51,7 +51,7 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(fetch(request).then((response) => {
             if (response.ok) caches.open(SHELL).then((cache) => cache.put('/', response.clone()));
             return response;
-        }).catch(async () => (await caches.match('/')) || new Response(OFFLINE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
+        }).catch(async () => (await caches.match(request)) || (await caches.match('/')) || new Response(OFFLINE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
         return;
     }
 
@@ -70,7 +70,7 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(caches.match(request).then((cached) => cached || fetch(request).then((response) => {
             if (response.ok) caches.open(SHELL).then((cache) => cache.put(request, response.clone()));
             return response;
-        })));
+        }).catch(() => caches.match(request)).catch(() => new Response('', { status: 503 }))));
         return;
     }
 
