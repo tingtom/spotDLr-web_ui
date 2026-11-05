@@ -41,6 +41,14 @@ self.addEventListener('activate', (event) => {
     ]));
 });
 
+// Every network attempt is time-boxed: a dead DNS resolver (Tailscale down, no signal) must
+// never freeze the app — fall through to cache/failure instead of hanging the page. The race
+// only covers response headers; bodies stream afterwards without a deadline.
+const net = (req, ms = 3000) => Promise.race([
+    fetch(req).catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
+]);
+
 self.addEventListener('fetch', (event) => {
     const request = event.request;
     if (request.method !== 'GET') return;
@@ -49,13 +57,7 @@ self.addEventListener('fetch', (event) => {
 
     if (request.mode === 'navigate') {
         event.respondWith((async () => {
-            // Fresh HTML when the network answers fast; otherwise (dead DNS, slow signal) fall
-            // through to the cached shell instead of holding the launch hostage for a timeout.
-            const fresh = fetch(request).catch(() => null);
-            const winner = await Promise.race([
-                fresh,
-                new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
-            ]);
+            const winner = await net(request, 4000); // fresh HTML when it answers fast
             if (winner && winner.ok) {
                 caches.open(SHELL).then((cache) => cache.put('/', winner.clone()));
                 return winner;
@@ -67,21 +69,29 @@ self.addEventListener('fetch', (event) => {
     }
 
     if (url.pathname.startsWith('/api/art/')) {
-        event.respondWith(caches.open(ART).then(async (cache) => {
+        event.respondWith((async () => {
+            const cache = await caches.open(ART);
             const cached = await cache.match(request);
             if (cached) return cached;
-            const response = await fetch(request);
+            const response = await net(request);
+            if (!response) return new Response('', { status: 504 });
             if (response.ok) { await cache.put(request, response.clone()); trim(ART, 150); }
             return response;
-        }));
+        })());
         return;
     }
 
     if (url.pathname.startsWith('/static/')) {
-        event.respondWith(caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-            if (response.ok) caches.open(SHELL).then((cache) => cache.put(request, response.clone()));
-            return response;
-        }).catch(() => caches.match(request)).catch(() => new Response('', { status: 503 }))));
+        event.respondWith((async () => {
+            const cached = await caches.match(request);
+            if (cached) return cached;
+            const response = await net(request);
+            if (response) {
+                if (response.ok) caches.open(SHELL).then((cache) => cache.put(request, response.clone()));
+                return response;
+            }
+            return (await caches.match(request)) || new Response('', { status: 503 });
+        })());
         return;
     }
 
@@ -89,15 +99,14 @@ self.addEventListener('fetch', (event) => {
         // Offline boot: last-known library and prefs when the server is unreachable.
         event.respondWith((async () => {
             const cache = await caches.open(SHELL);
-            try {
-                const response = await fetch(request);
+            const response = await net(request);
+            if (response) {
                 if (response.ok) await cache.put(request, response.clone());
                 return response;
-            } catch {
-                const cached = await cache.match(request);
-                if (cached) return cached;
-                return new Response('null', { status: 504, headers: { 'Content-Type': 'application/json' } });
             }
+            const cached = await cache.match(request);
+            if (cached) return cached;
+            return new Response('null', { status: 504, headers: { 'Content-Type': 'application/json' } });
         })());
         return;
     }
@@ -124,33 +133,30 @@ self.addEventListener('fetch', (event) => {
                         headers: { 'Content-Type': type, 'Content-Length': String(end - start + 1), 'Content-Range': `bytes ${start}-${end}/${buf.byteLength}`, 'Accept-Ranges': 'bytes' },
                     });
                 }
-                return fetch(request);
+                return (await net(request)) || new Response(null, { status: 504 });
             }
             const cached = await cache.match(key);
             if (cached) return cached;
-            try {
-                const response = await fetch(request);
-                if (response.ok && response.status === 200) {
-                    let allow = true;
-                    try { // honour the user's offline storage budget before storing
-                        const cfg = await caches.match('/offline-limit', { cacheName: 'spotdlr-config' });
-                        const gb = cfg ? parseFloat(await cfg.text()) : NaN;
-                        if (isFinite(gb)) {
-                            const est = await navigator.storage.estimate();
-                            if (est && est.usage >= gb * 1024 ** 3) allow = false;
-                        }
-                    } catch { /* no known budget: quota errors are handled below */ }
-                    if (allow) {
-                        try {
-                            await cache.put(key, response.clone());
-                            trim(MUSIC, MUSIC_LIMIT);
-                        } catch { /* storage quota: the song plays, it just isn't kept */ }
+            const response = await net(request);
+            if (!response) return new Response(null, { status: 504 });
+            if (response.ok && response.status === 200) {
+                let allow = true;
+                try { // honour the user's offline storage budget before storing
+                    const cfg = await caches.match('/offline-limit', { cacheName: 'spotdlr-config' });
+                    const gb = cfg ? parseFloat(await cfg.text()) : NaN;
+                    if (isFinite(gb)) {
+                        const est = await navigator.storage.estimate();
+                        if (est && est.usage >= gb * 1024 ** 3) allow = false;
                     }
+                } catch { /* no known budget: quota errors are handled below */ }
+                if (allow) {
+                    try {
+                        await cache.put(key, response.clone());
+                        trim(MUSIC, MUSIC_LIMIT);
+                    } catch { /* storage quota: the song plays, it just isn't kept */ }
                 }
-                return response;
-            } catch {
-                return new Response(null, { status: 504 });
             }
+            return response;
         })());
         return;
     }
