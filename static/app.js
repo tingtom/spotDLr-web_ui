@@ -1848,7 +1848,7 @@ const V = {
     particles: null, stars: null, rotation: 0, arm: null, ridge: null, cover: null, // per-mode state
 };
 if (!VIZ[V.mode]) V.mode = 'bars';
-V.analysis = store.get('analysis', 'tap'); // 'tap' | 'clone' (clone = direct sound, silent twin analyzed)
+V.analysis = store.get('analysis', 'clone'); // default clone: live players never touch Web Audio, a silent twin feeds the visualizer
 
 // One MediaElementSource per element, kept for the session (creating a second one throws).
 function audioSource(el) {
@@ -1878,7 +1878,10 @@ function buildTap() {
 function buildClone() {
     graphVolume = null; xfVolume = null; // stale gains must not hijack applyVolume
     try { V.analyser.disconnect(); } catch {}
-    if (V.elemSources) V.elemSources.forEach((src) => { try { src.disconnect(); } catch {} }); // live players off the graph entirely
+    // createMediaElementSource is a one-way door: a player that was ever routed has no path back
+    // to the speakers on its own. Re-seat it on the destination (straight out, no processing)
+    // instead of stranding it; a fresh page load never routes the players at all.
+    if (V.elemSources) V.elemSources.forEach((src) => { try { src.disconnect(); src.connect(V.ctx.destination); } catch {} });
     if (!V.cloneEl) {
         V.cloneEl = new Audio();
         V.cloneEl.preload = 'auto';
@@ -1916,7 +1919,7 @@ function setAnalysis(mode) {
     stopClone();
     if (!V.ctx) return;
     try { V.analyser && V.analyser.disconnect(); } catch {}
-    if (V.elemSources) V.elemSources.forEach((src) => { try { src.disconnect(); } catch {} });
+    if (V.elemSources) V.elemSources.forEach((src) => { try { src.disconnect(); src.connect(V.ctx.destination); } catch {} }); // never strand a routed player
     V.sources = null; V.meters = null; V.wireMode = null;
     graphVolume = null; xfVolume = null;
     applyVolume();
