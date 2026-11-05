@@ -574,6 +574,19 @@ function loadAndPlay() {
         if (ready && err.name === 'NotAllowedError' && currentTrack() === t) { unswapPlayers(t); return play(); }
         throw err;
     }).catch((err) => {
+        if (err.name === 'NotAllowedError' && document.hidden) {
+            // Screen locked: no tap is possible, and Chrome can refuse the first background
+            // play(). Keep retrying instead of parking on an overlay nobody can press.
+            let tries = 0;
+            const retry = () => P.audio.play().then(() => {}).catch((e2) => {
+                if (e2.name === 'AbortError') return; // a newer track took over
+                if (++tries < 10 && document.hidden && e2.name === 'NotAllowedError') setTimeout(retry, 2000);
+                else if (e2.name === 'NotAllowedError' && document.hidden) mediaSessionRetryHint();
+                else if (e2.name !== 'NotAllowedError') showTapToPlay(P.context?.label || t.title);
+            });
+            setTimeout(retry, 1000);
+            return false;
+        }
         if (err.name === 'NotAllowedError') showTapToPlay(P.context?.label || t.title); // no click on this page yet
         else if (err.name !== 'AbortError') toast(`Couldn't play "${t.title}"`, 'error');
         return false;
@@ -581,6 +594,10 @@ function loadAndPlay() {
     updateNowPlaying();
     saveSession();
     return started;
+}
+
+function mediaSessionRetryHint() { // background play still refused: remember it for the next time the app is seen
+    try { sessionStorage.setItem('spotdlr.bgPlayFailed', String(Date.now())); } catch { /* private mode */ }
 }
 
 function togglePlay() {
