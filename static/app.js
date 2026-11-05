@@ -337,6 +337,7 @@ const PB = { // playback settings (Settings → Playback)
     crossfade: store.get('crossfade', 0),     // seconds, 0 = off
 };
 P.userVolume = store.get('volume', 0.8);
+P.vizBoost = store.get('vizBoost', 0); // dB of extra output gain while the visualizer's Web Audio path is active
 P.trackGain = 1;   // < 1 turns a loud song down to TARGET_LUFS ("Even out volume")
 P.fadeIn = 1;      // crossfade: the incoming song's share
 P.sleepGain = 1;   // sleep timer: fades out over its last 10 s
@@ -1866,10 +1867,19 @@ function buildTap() {
     try { V.analyser.disconnect(); } catch {}
     try { xfVolume.disconnect(); } catch {} // orphaned crossfade tail must not double through the old chain
     graphVolume = null; xfVolume = null; // stale gains must not hijack applyVolume
-    a.connect(V.ctx.destination);
-    x.connect(V.ctx.destination);
+    V.tapOut = V.ctx.createGain(); // unity by default; compensates phones that quiet the Web Audio path
+    V.tapOut.gain.value = 10 ** ((P.vizBoost || 0) / 20);
+    a.connect(V.tapOut);
+    x.connect(V.tapOut);
+    V.tapOut.connect(V.ctx.destination);
     a.connect(V.analyser);
     x.connect(V.analyser);
+}
+
+function setVizBoost(db) {
+    P.vizBoost = Math.max(0, Math.min(12, +db || 0));
+    store.set('vizBoost', P.vizBoost);
+    if (V.tapOut && V.ctx) V.tapOut.gain.setTargetAtTime(10 ** (P.vizBoost / 20), V.ctx.currentTime, 0.02);
 }
 
 // Full graph: analyser feeds the effects chain instead of the speakers directly.
@@ -1910,7 +1920,7 @@ function bypassWebAudio(on) {
     if (on) {
         try { V.ctx && V.ctx.close && V.ctx.close(); } catch {}
         V.ctx = null; V.analyser = null; V.sources = null; V.meters = null;
-        V.tapOnly = false; V.tapSource = null; V.elemSources = null; V.wireMode = null;
+        V.tapOnly = false; V.tapSource = null; V.elemSources = null; V.wireMode = null; V.tapOut = null;
         try { graphVolume = null; } catch {}
         try { xfVolume = null; } catch {}
         applyVolume();
@@ -3512,6 +3522,11 @@ function openSettings(focus = 'appearance') {
                         <small id="loudStatus" role="status"></small>
                     </div>
                     <div class="field">
+                        <label for="setVizBoost">Visualizer volume boost <span class="field-value" id="vizBoostValue">${P.vizBoost} dB</span></label>
+                        <input type="range" class="bar" id="setVizBoost" min="0" max="12" step="1" value="${P.vizBoost}" aria-valuetext="${P.vizBoost} dB">
+                        <small>If this phone quiets audio while a visualizer is showing, raise this until full view sounds the same as the menu. Only applies while the visualizer is active.</small>
+                    </div>
+                    <div class="field">
                         <label for="setCrossfade">Crossfade <span class="field-value" id="crossfadeValue">${PB.crossfade ? `${PB.crossfade} s` : 'Off'}</span></label>
                         <input type="range" class="bar" id="setCrossfade" min="0" max="12" step="1" value="${PB.crossfade}" ${VOLUME_WORKS ? '' : new Safe('disabled')} aria-valuetext="${PB.crossfade ? `${PB.crossfade} seconds` : 'Off'}">
                         <small>The end of each song blends into the start of the next. Not on Repeat one, or when a song is shorter than twice this.</small>
@@ -3585,7 +3600,7 @@ function openSettings(focus = 'appearance') {
             if (P.balance) fx.push('balance:' + P.balance);
         } catch {}
         al.textContent = `Audio: ${V.wireMode || 'direct'}${fx.length ? ' (effects: ' + fx.join(', ') + ')' : ' (no effects)'}, vol ${(P.userVolume * 100) | 0}%` +
-            ` [gains tg=${(+P.trackGain).toFixed(2)} fi=${(+P.fadeIn).toFixed(2)} sl=${(+P.sleepGain).toFixed(2)} wk=${(+P.wakeGain).toFixed(2)} el=${(+P.audio.volume).toFixed(2)}${P.audio.muted ? ' MUTED' : ''}${V.ctx ? (V.ctx.state || '') : ' noctx'}]`;
+            ` [gains tg=${(+P.trackGain).toFixed(2)} fi=${(+P.fadeIn).toFixed(2)} sl=${(+P.sleepGain).toFixed(2)} wk=${(+P.wakeGain).toFixed(2)} el=${(+P.audio.volume).toFixed(2)} bz=${P.vizBoost}dB${P.audio.muted ? ' MUTED' : ''}${V.ctx ? (V.ctx.state || '') : ' noctx'}]`;
         const bb = $('#audioBypass', backdrop);
         if (bb) {
             bb.textContent = V.bypassed ? 'Re-enable Web Audio (restores visualizer analysis)' : 'Use direct audio (disables visualizer analysis)';
@@ -3893,6 +3908,7 @@ function openSettings(focus = 'appearance') {
         el.textContent = !PB.normalize ? '' : r.running ? `Measuring songs…${r.total ? ` ${r.done} of ${r.total}` : ''}` : `${plural(r.measured, 'song')} measured`;
         if (r.running && PB.normalize) setTimeout(loudStatus, 2000);
     }).catch(() => {});
+    $('#setVizBoost').addEventListener('input', (e) => { setVizBoost(e.target.value); $('#vizBoostValue').textContent = `${e.target.value} dB`; });
     $('#setNormalize').addEventListener('change', (e) => {
         PB.normalize = e.target.checked;
         store.set('normalize', PB.normalize);
@@ -5620,6 +5636,7 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
     menu.style.left = `${Math.max(8, Math.min(left, innerWidth - w - 8))}px`;
     menu.style.top = `${top}px`;
     M.opener = anchor || document.activeElement;
+    M.anchor = anchor; // non-null only for button-anchored menus (the re-tap exemption in `outside`)
     M.prevOverflow = document.documentElement.style.overflow; // lock page scroll: a scroll between touch-down and touch-up moves content under a fixed menu and misroutes the tap
     document.documentElement.style.overflow = 'hidden';
     if (anchor) anchor.setAttribute('aria-expanded', 'true');
@@ -5641,7 +5658,13 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
         else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); buttons[e.key === 'Home' ? 0 : buttons.length - 1].focus(); }
         else if (e.key === 'Tab') closeMenu(false);
     };
-    const outside = (e) => { if (!menu.contains(e.target)) { menuEvent('close:tap-outside'); closeMenu(false); } };
+    const outside = (e) => {
+        if (!menu.isConnected) return; // stale listener from a dead menu: never act on a detached box
+        if (menu.contains(e.target)) return;
+        if (M.anchor && (e.target === M.anchor || M.anchor.contains(e.target))) return; // re-tapping ⋯ belongs to the toggle, not to dismissal
+        menuEvent(`close:outside ${String(e.target.className || e.target.tagName).slice(0, 30)}`);
+        closeMenu(false);
+    };
     let openedAt = Date.now();
     const away = () => { if (Date.now() - openedAt > 500) { menuEvent('close:scroll/resize'); closeMenu(false); } }; // grace for open-time layout shifts on mobile
     // A tap's own micro-scroll must not dismiss the menu before the tap lands: any press
@@ -5649,7 +5672,10 @@ function showMenu(items, { anchor = null, x = 0, y = 0, label = 'Options' } = {}
     menu.addEventListener('pointerdown', () => { openedAt = Date.now(); }, true);
     menu.addEventListener('click', pick);
     menu.addEventListener('keydown', onKey);
-    setTimeout(() => document.addEventListener('pointerdown', outside, true)); // not the click that opened it
+    // Registered synchronously: the opening tap's pointerdown has already finished by now, and a
+    // deferred registration was a leak vector (a menu closed in the same tick left a listener
+    // behind that killed every menu opened afterwards).
+    document.addEventListener('pointerdown', outside, true);
     window.addEventListener('resize', away);
     document.addEventListener('scroll', away, true);
     M.cleanup = () => {
@@ -5664,6 +5690,7 @@ function closeMenu(returnFocus = true) {
     if (!M.cleanup) return;
     M.cleanup();
     M.cleanup = null;
+    M.anchor = null;
     $('#menuRoot').innerHTML = '';
     if (M.opener) {
         M.opener.removeAttribute?.('aria-expanded');
