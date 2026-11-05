@@ -355,6 +355,19 @@ function onPlayer(type, fn) {
 // silence between songs. Not with crossfade on: the spare plays the outgoing song's tail then, and the fade hides
 // the load. iPhone Safari may not buffer a player that isn't playing; then the swap just loads at play, as before.
 const READY_AHEAD = 10;
+function prerollNext() {
+    // Gapless handoff: start the preloaded spare while the current song still has its last
+    // fraction of a second. The swap then happens with audio already flowing — Android refuses
+    // background play() when nothing is sounding, which stops playlists at song boundaries.
+    if (IOS || PB.crossfade || XF.active || !XF.ready || P.audio.paused || P.repeat === 'one' || SL.endOfSong) return;
+    const d = P.audio.duration;
+    if (!d || XF.el.error || XF.el.readyState < 3) return;
+    const left = d - P.audio.currentTime;
+    if (left > 0.7 || left <= 0.03) return; // too early — timeupdate will come back; too late — ended takes over
+    if (!XF.el.paused) return;
+    XF.el.play().catch(() => {}); // denied: the ended handler's normal path + retries still cover it
+}
+
 function readyNext() {
     // Never on iPhone/iPad (any browser there is WebKit): with the screen locked iOS only lets the element that was
     // already playing carry on, so the swapped-in one stayed silent until the page was opened (Holden, Oct 31)
@@ -581,7 +594,9 @@ function loadAndPlay() {
             // load itself failed — instead of parking on an overlay nobody can press.
             const url = `/api/stream/${encodeURIComponent(t.id)}`;
             let tries = 0;
-            const retry = () => P.audio.play().then(() => {}).catch((e2) => {
+            const retry = () => P.audio.play().then(() => {
+                if (XF.prepared && !XF.active) { try { XF.el.pause(); } catch {} XF.prepared = null; } // the old tail's job is done
+            }).catch((e2) => {
                 if (e2.name === 'AbortError') return; // a newer track took over
                 if (e2.name === 'NotSupportedError' || e2.name === 'NetworkError') {
                     try { P.audio.src = url; P.audio.load(); } catch { /* next try */ }
@@ -957,7 +972,17 @@ function startFade(secs) {
         XF.switching = false;
         Promise.resolve(incoming).then((started) => {
             if (!XF.active) return;
-            if (started === false) { endFade(); return; }
+            if (started === false) {
+                // The incoming song couldn't start (background autoplay). The spare is now
+                // carrying the outgoing song's tail — endFade() would kill that audio mid-note,
+                // which is the "song ends just before the end" bug. Keep the tail playing,
+                // hand the main player back its gain, and let the background retry start the
+                // next song (the retry stops the tail once it's audible).
+                P.fadeIn = 1;
+                XF.active = false;
+                applyVolume();
+                return;
+            }
             const elapsed = (performance.now() - loadStarted) / 1000;
             const fadeSecs = Math.max(0.25, secs - elapsed);
             const t0 = performance.now();
@@ -3274,6 +3299,10 @@ function bindPlayer() {
     });
     onPlayer('timeupdate', maybeCrossfade);
     onPlayer('timeupdate', readyNext);
+    onPlayer('timeupdate', prerollNext);
+    onPlayer('play', () => { // main sounding again: any leftover crossfade tail (not an active fade) is done
+        if (XF.prepared && !XF.active && !XF.switching) { try { XF.el.pause(); } catch {} XF.prepared = null; }
+    });
     onPlayer('pause', () => { if (XF.active && !XF.switching) endFade(); });
     onPlayer('seeking', () => { listen.last = null; });  // a jump isn't listening
     window.addEventListener('pagehide', () => { flushListen(true); saveSession(); });
