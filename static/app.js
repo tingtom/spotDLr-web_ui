@@ -995,9 +995,13 @@ function endFade() {
 const RECOVERY_WAIT_MS = 8000;
 const playbackRecovery = { timer: null, trackId: null, time: 0, attempts: 0, serial: 0 };
 
-function playbackRecoveryAction({ paused, ended, sameTrack, advanced, currentTime, duration, attempts }) {
-    if (paused || ended || !sameTrack || advanced) return null;
-    if (Number.isFinite(duration) && duration > 0 && duration - currentTime <= 1) return 'next';
+function playbackRecoveryAction({ paused, ended, sameTrack, advanced, currentTime, duration, attempts, hidden }) {
+    if (ended || !sameTrack || advanced) return null;
+    if (paused && !hidden) return null; // on screen, a paused player is the user's choice
+    if (paused && hidden && attempts >= 10) return null; // locked: keep trying, but not forever
+    if (Number.isFinite(duration) && duration > 0 && duration - currentTime <= 1 && !paused) return 'next';
+    if (hidden && paused) return 'retry';   // locked and not sounding: reload + play, up to the cap above
+    if (hidden) return 'watch';             // locked and merely stalled: the stream resumes itself when the network does
     return attempts < 3 ? 'retry' : 'wait';
 }
 
@@ -1015,16 +1019,17 @@ function armPlaybackRecovery() {
     if (playbackRecovery.trackId !== t.id) resetPlaybackRecovery(t.id);
     const trackId = t.id, stalledAt = P.audio.currentTime || 0;
     playbackRecovery.time = stalledAt;
-    playbackRecovery.timer = setTimeout(() => {
+    const check = () => {
         playbackRecovery.timer = null;
         const current = currentTrack();
         const action = playbackRecoveryAction({
             paused: P.audio.paused, ended: P.audio.ended, sameTrack: current?.id === trackId,
             advanced: (P.audio.currentTime || 0) > stalledAt + 0.25,
             currentTime: P.audio.currentTime || 0, duration: P.audio.duration,
-            attempts: playbackRecovery.attempts,
+            attempts: playbackRecovery.attempts, hidden: document.hidden,
         });
         if (action === 'next') { next(true); return; }
+        if (action === 'watch') { playbackRecovery.timer = setTimeout(check, RECOVERY_WAIT_MS * 2); return; } // locked: keep watching, no tap needed
         if (action === 'wait') { toast('Playback is still waiting for the connection. Tap pause, then play to retry.', 'error'); return; }
         if (action !== 'retry') return;
 
@@ -1037,9 +1042,12 @@ function armPlaybackRecovery() {
             if (currentTrack()?.id === trackId && resumeAt < P.audio.duration - 1) P.audio.currentTime = resumeAt;
         }, { once: true });
         P.audio.play().catch((error) => {
-            if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') toast(`Couldn't resume "${current?.title || 'song'}"`, 'error');
+            if (error.name === 'AbortError') return;
+            if (document.hidden) { playbackRecovery.timer = setTimeout(check, RECOVERY_WAIT_MS); return; } // locked: try again next round
+            if (error.name !== 'NotAllowedError') toast(`Couldn't resume "${current?.title || 'song'}"`, 'error');
         });
-    }, RECOVERY_WAIT_MS);
+    };
+    playbackRecovery.timer = setTimeout(check, RECOVERY_WAIT_MS);
 }
 
 function notePlaybackProgress() {
