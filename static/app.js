@@ -694,6 +694,22 @@ function updateNowPlaying() {
         });
     }
     markPlaying();
+    updatePositionState();
+}
+
+// Lock screens use position state to treat the page as a full media session; without it some
+// Chrome/Android versions keep a weaker session and are quicker to suspend it when locked.
+function updatePositionState() {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+    const d = P.audio.duration;
+    if (!d || !isFinite(d)) return;
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: d,
+            position: Math.max(0, Math.min(P.audio.currentTime || 0, d)),
+            playbackRate: P.audio.playbackRate || 1,
+        });
+    } catch { /* stale state (seeking) */ }
 }
 
 function updateControls() {
@@ -3283,7 +3299,9 @@ function bindPlayer() {
         $('#timeTotal').textContent = fmtTime(d);
         updateNowProgress();
     });
-    onPlayer('loadedmetadata', () => { $('#timeTotal').textContent = fmtTime(P.audio.duration); });
+    onPlayer('loadedmetadata', () => { $('#timeTotal').textContent = fmtTime(P.audio.duration); updatePositionState(); });
+    let posLast = 0;
+    onPlayer('timeupdate', () => { if (Date.now() - posLast > 5000) { posLast = Date.now(); updatePositionState(); } });
     onPlayer('play', updateControls);
     onPlayer('pause', () => {
         clearTimeout(playbackRecovery.timer);
