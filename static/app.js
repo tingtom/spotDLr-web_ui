@@ -601,7 +601,7 @@ function loadAndPlay() {
                 if (e2.name === 'NotSupportedError' || e2.name === 'NetworkError') {
                     try { P.audio.src = url; P.audio.load(); } catch { /* next try */ }
                 }
-                if (++tries < 60 && document.hidden) setTimeout(retry, 3000); // ~3 minutes while locked
+                if (++tries < 200 && document.hidden) setTimeout(retry, 3000); // ~10 minutes: outside means long stretches of bad signal
                 else if (document.hidden) mediaSessionRetryHint(); // give up quietly; the app is out of sight
                 else showTapToPlay(P.context?.label || t.title); // visible again and still failing
             });
