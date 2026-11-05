@@ -48,10 +48,21 @@ self.addEventListener('fetch', (event) => {
     if (url.origin !== location.origin) return;
 
     if (request.mode === 'navigate') {
-        event.respondWith(fetch(request).then((response) => {
-            if (response.ok) caches.open(SHELL).then((cache) => cache.put('/', response.clone()));
-            return response;
-        }).catch(async () => (await caches.match(request)) || (await caches.match('/')) || new Response(OFFLINE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
+        event.respondWith((async () => {
+            // Fresh HTML when the network answers fast; otherwise (dead DNS, slow signal) fall
+            // through to the cached shell instead of holding the launch hostage for a timeout.
+            const fresh = fetch(request).catch(() => null);
+            const winner = await Promise.race([
+                fresh,
+                new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+            ]);
+            if (winner && winner.ok) {
+                caches.open(SHELL).then((cache) => cache.put('/', winner.clone()));
+                return winner;
+            }
+            return (await caches.match(request)) || (await caches.match('/'))
+                || new Response(OFFLINE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        })());
         return;
     }
 

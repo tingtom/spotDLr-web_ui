@@ -3729,9 +3729,9 @@ function openSettings(focus = 'appearance') {
         let persisted = null;
         try { persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : null; } catch { /* unsupported */ }
         const storageNote = persisted === null ? '' : persisted ? ', storage protected from eviction' : ', ⚠ storage evictable';
-        el.textContent = controlled
-            ? `Offline: worker ${ver} active, ${songs} song${songs === 1 ? '' : 's'} cached on this device${storageNote}.`
-            : `Offline: worker not in control (served ${ver}, ${songs} songs cached${storageNote}). Reload once on this address, then retry.`;
+        el.textContent = `${location.origin} — ` + (controlled
+            ? `worker ${ver} active, ${songs} song${songs === 1 ? '' : 's'} cached on this device${storageNote}.`
+            : `worker not in control (served ${ver}, ${songs} songs cached${storageNote}). Reload once on this address, then retry.`);
     })();
     const opener = document.activeElement;
     const close = () => { $('#modalRoot').innerHTML = ''; if (opener && opener.focus) opener.focus(); };
