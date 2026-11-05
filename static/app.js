@@ -337,7 +337,6 @@ const PB = { // playback settings (Settings → Playback)
     crossfade: store.get('crossfade', 0),     // seconds, 0 = off
 };
 P.userVolume = store.get('volume', 0.8);
-P.vizBoost = store.get('vizBoost', 0); // dB of extra output gain while the visualizer's Web Audio path is active
 P.trackGain = 1;   // < 1 turns a loud song down to TARGET_LUFS ("Even out volume")
 P.fadeIn = 1;      // crossfade: the incoming song's share
 P.sleepGain = 1;   // sleep timer: fades out over its last 10 s
@@ -1849,6 +1848,7 @@ const V = {
     particles: null, stars: null, rotation: 0, arm: null, ridge: null, cover: null, // per-mode state
 };
 if (!VIZ[V.mode]) V.mode = 'bars';
+V.analysis = store.get('analysis', 'tap'); // 'tap' | 'clone' (clone = direct sound, silent twin analyzed)
 
 // One MediaElementSource per element, kept for the session (creating a second one throws).
 function audioSource(el) {
@@ -1863,27 +1863,70 @@ function audioSource(el) {
 // touches the output path (some devices attenuate when analysis sits inline). Paused players
 // contribute silence, so both connections are permanent — no rewiring on song swaps.
 function buildTap() {
+    stopClone();
     const a = audioSource(P.audio), x = audioSource(XF.el);
     try { V.analyser.disconnect(); } catch {}
     try { xfVolume.disconnect(); } catch {} // orphaned crossfade tail must not double through the old chain
     graphVolume = null; xfVolume = null; // stale gains must not hijack applyVolume
-    V.tapOut = V.ctx.createGain(); // unity by default; compensates phones that quiet the Web Audio path
-    V.tapOut.gain.value = 10 ** ((P.vizBoost || 0) / 20);
-    a.connect(V.tapOut);
-    x.connect(V.tapOut);
-    V.tapOut.connect(V.ctx.destination);
     a.connect(V.analyser);
     x.connect(V.analyser);
 }
 
-function setVizBoost(db) {
-    P.vizBoost = Math.max(0, Math.min(12, +db || 0));
-    store.set('vizBoost', P.vizBoost);
-    if (V.tapOut && V.ctx) V.tapOut.gain.setTargetAtTime(10 ** (P.vizBoost / 20), V.ctx.currentTime, 0.02);
+// Clone mode: the live players are never touched — they play straight to the speakers — and a
+// hidden twin of the same song feeds the analyser, its own output killed by a zero gain, so the
+// Web Audio path can't change what you hear (some phones quietly attenuate it).
+function buildClone() {
+    graphVolume = null; xfVolume = null; // stale gains must not hijack applyVolume
+    try { V.analyser.disconnect(); } catch {}
+    if (V.elemSources) V.elemSources.forEach((src) => { try { src.disconnect(); } catch {} }); // live players off the graph entirely
+    if (!V.cloneEl) {
+        V.cloneEl = new Audio();
+        V.cloneEl.preload = 'auto';
+        V.cloneSrc = V.ctx.createMediaElementSource(V.cloneEl); // one source node per element, for the session
+        V.cloneZero = V.ctx.createGain();
+        V.cloneZero.gain.value = 0;
+        V.cloneSrc.connect(V.cloneZero);
+        V.cloneZero.connect(V.ctx.destination); // silence: the device never plays the twin
+        V.cloneSrc.connect(V.analyser);
+    }
+    if (V.cloneEl.src !== P.audio.src) V.cloneEl.src = P.audio.src;
+    if (!V.cloneTick) {
+        V.cloneTick = setInterval(() => {
+            const live = P.audio;
+            if (document.hidden) { if (!V.cloneEl.paused) V.cloneEl.pause(); return; } // battery: idle with the screen off
+            if (!live.src || !V.cloneEl) return;
+            if (V.cloneEl.src !== live.src) V.cloneEl.src = live.src;
+            if (live.paused) { if (!V.cloneEl.paused) V.cloneEl.pause(); return; }
+            if (V.cloneEl.paused) V.cloneEl.play().catch(() => {});
+            else if (Math.abs(V.cloneEl.currentTime - live.currentTime) > 0.3) {
+                try { V.cloneEl.currentTime = live.currentTime; } catch { /* seeking mid-load */ }
+            }
+        }, 500);
+    }
+}
+
+function stopClone() {
+    if (V.cloneTick) { clearInterval(V.cloneTick); V.cloneTick = null; }
+    if (V.cloneEl) { try { V.cloneEl.pause(); V.cloneEl.removeAttribute('src'); } catch {} }
+}
+
+function setAnalysis(mode) {
+    V.analysis = mode === 'clone' ? 'clone' : 'tap';
+    store.set('analysis', V.analysis);
+    stopClone();
+    if (!V.ctx) return;
+    try { V.analyser && V.analyser.disconnect(); } catch {}
+    if (V.elemSources) V.elemSources.forEach((src) => { try { src.disconnect(); } catch {} });
+    V.sources = null; V.meters = null; V.wireMode = null;
+    graphVolume = null; xfVolume = null;
+    applyVolume();
+    ensureAudioGraph(); // rebuild immediately when the visualizer is up
+    toast(V.analysis === 'clone' ? 'Direct sound + silent-twin analysis on.' : 'Side-tap analysis on.');
 }
 
 // Full graph: analyser feeds the effects chain instead of the speakers directly.
 function buildFull() {
+    stopClone(); // effects take over the real signal; the twin has no job here
     try { V.analyser.disconnect(); } catch {}
     try { xfVolume.disconnect(); } catch {}
     const a = audioSource(P.audio), x = audioSource(XF.el);
@@ -1920,7 +1963,7 @@ function bypassWebAudio(on) {
     if (on) {
         try { V.ctx && V.ctx.close && V.ctx.close(); } catch {}
         V.ctx = null; V.analyser = null; V.sources = null; V.meters = null;
-        V.tapOnly = false; V.tapSource = null; V.elemSources = null; V.wireMode = null; V.tapOut = null;
+        V.tapOnly = false; V.tapSource = null; V.elemSources = null; V.wireMode = null; stopClone();
         try { graphVolume = null; } catch {}
         try { xfVolume = null; } catch {}
         applyVolume();
@@ -1932,7 +1975,8 @@ function ensureAudioGraph() {
     // elements (pass-through nodes), which otherwise keep playing straight to the speakers.
     // The full graph is only built when an effect is actually in use, and upgraded to on demand.
     if (V.bypassed) return false;
-    if (V.analyser && V.wireMode === (soundInUse() ? 'full' : 'tap')) return true;
+    const want = soundInUse() ? 'full' : (V.analysis === 'clone' ? 'clone' : 'tap');
+    if (V.analyser && V.wireMode === want) return true;
     if (IOS) { // never route the music through Web Audio here: it would stop when the screen locks
         V.ctx = { sampleRate: 44100, state: 'running', resume() {} };
         V.analyser = syntheticAnalyser();
@@ -1958,9 +2002,9 @@ function ensureAudioGraph() {
             }
         }
         if (!soundInUse()) {
-            buildTap();
+            if (V.analysis === 'clone') buildClone(); else buildTap();
             V.sources = null; V.meters = null;
-            V.wireMode = 'tap';
+            V.wireMode = V.analysis === 'clone' ? 'clone' : 'tap';
         } else {
             buildFull();
             V.wireMode = 'full';
@@ -2232,7 +2276,10 @@ const PULSE_MODES = new Set(['bars', 'wave', 'ring', 'particles', 'retro']); // 
 
 function vizFrame(now) {
     V.raf = 0;
-    if (!NV.open || V.mode === 'off' || !V.analyser || document.hidden) return;
+    if (!NV.open || V.mode === 'off' || !V.analyser || document.hidden) {
+        if (V.cloneTick && (!NV.open || V.mode === 'off')) stopClone();
+        return;
+    }
     const frameMs = 1000 / (V.mode === 'cassette' ? 24 : 30);
     if (V.drawLast && now - V.drawLast < frameMs) { V.raf = requestAnimationFrame(vizFrame); return; }
     V.drawLast = now;
@@ -3522,9 +3569,8 @@ function openSettings(focus = 'appearance') {
                         <small id="loudStatus" role="status"></small>
                     </div>
                     <div class="field">
-                        <label for="setVizBoost">Visualizer volume boost <span class="field-value" id="vizBoostValue">${P.vizBoost} dB</span></label>
-                        <input type="range" class="bar" id="setVizBoost" min="0" max="12" step="1" value="${P.vizBoost}" aria-valuetext="${P.vizBoost} dB">
-                        <small>If this phone quiets audio while a visualizer is showing, raise this until full view sounds the same as the menu. Only applies while the visualizer is active.</small>
+                        <label class="check"><input type="checkbox" id="setDirectViz" ${V.analysis === 'clone' ? 'checked' : ''}> Direct sound while visualizing</label>
+                        <small>The players keep a straight line to the speakers and the visualizer reads a silent twin of the same song instead — the analysis path can never change the volume. Use this if the default analysis quiets music on this phone.</small>
                     </div>
                     <div class="field">
                         <label for="setCrossfade">Crossfade <span class="field-value" id="crossfadeValue">${PB.crossfade ? `${PB.crossfade} s` : 'Off'}</span></label>
@@ -3600,7 +3646,7 @@ function openSettings(focus = 'appearance') {
             if (P.balance) fx.push('balance:' + P.balance);
         } catch {}
         al.textContent = `Audio: ${V.wireMode || 'direct'}${fx.length ? ' (effects: ' + fx.join(', ') + ')' : ' (no effects)'}, vol ${(P.userVolume * 100) | 0}%` +
-            ` [gains tg=${(+P.trackGain).toFixed(2)} fi=${(+P.fadeIn).toFixed(2)} sl=${(+P.sleepGain).toFixed(2)} wk=${(+P.wakeGain).toFixed(2)} el=${(+P.audio.volume).toFixed(2)} bz=${P.vizBoost}dB${P.audio.muted ? ' MUTED' : ''}${V.ctx ? (V.ctx.state || '') : ' noctx'}]`;
+            ` [gains tg=${(+P.trackGain).toFixed(2)} fi=${(+P.fadeIn).toFixed(2)} sl=${(+P.sleepGain).toFixed(2)} wk=${(+P.wakeGain).toFixed(2)} el=${(+P.audio.volume).toFixed(2)} an=${V.analysis || 'tap'}${P.audio.muted ? ' MUTED' : ''}${V.ctx ? (V.ctx.state || '') : ' noctx'}]`;
         const bb = $('#audioBypass', backdrop);
         if (bb) {
             bb.textContent = V.bypassed ? 'Re-enable Web Audio (restores visualizer analysis)' : 'Use direct audio (disables visualizer analysis)';
@@ -3908,7 +3954,7 @@ function openSettings(focus = 'appearance') {
         el.textContent = !PB.normalize ? '' : r.running ? `Measuring songs…${r.total ? ` ${r.done} of ${r.total}` : ''}` : `${plural(r.measured, 'song')} measured`;
         if (r.running && PB.normalize) setTimeout(loudStatus, 2000);
     }).catch(() => {});
-    $('#setVizBoost').addEventListener('input', (e) => { setVizBoost(e.target.value); $('#vizBoostValue').textContent = `${e.target.value} dB`; });
+    $('#setDirectViz').addEventListener('change', (e) => setAnalysis(e.target.checked ? 'clone' : 'tap'));
     $('#setNormalize').addEventListener('change', (e) => {
         PB.normalize = e.target.checked;
         store.set('normalize', PB.normalize);
