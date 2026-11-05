@@ -3669,6 +3669,11 @@ function openSettings(focus = 'appearance') {
                             <label class="check"><input type="checkbox" id="setLyrics" ${s.lyrics ? new Safe('checked') : ''}> Save synced lyrics (.lrc files)</label>
                             <small>For new music downloads.</small>
                         </div>
+                        <div class="field">
+                            <label for="setOfflineLimit">Offline storage limit <span class="field-value" id="offlineLimitValue">${offlineLimitGb()} GB</span></label>
+                            <input type="range" class="bar" id="setOfflineLimit" min="2" max="100" step="2" value="${offlineLimitGb()}" aria-valuetext="${offlineLimitGb()} GB">
+                            <small>Offline copies stop being stored at this size — nothing already saved is deleted, and the offline dialog stops with a message. Your phone's free space is the hard ceiling.</small>
+                        </div>
                         <div class="modal-actions"><button type="submit" class="pill-btn primary">Save download settings</button></div>
                     </form>
                     <div class="field lyrics-save">
@@ -4070,6 +4075,12 @@ function openSettings(focus = 'appearance') {
     });
 
     $('#setFormat').addEventListener('change', (e) => { $('#setBitrate').disabled = lossless(e.target.value); });
+    $('#setOfflineLimit').addEventListener('input', (e) => {
+        store.set('offlineLimitGb', +e.target.value);
+        $('#offlineLimitValue').textContent = `${offlineLimitGb()} GB`;
+        e.target.setAttribute('aria-valuetext', `${offlineLimitGb()} GB`);
+        syncOfflineLimit().catch(() => {});
+    });
     $('#dlForm').addEventListener('submit', (e) => {
         e.preventDefault();
         S.settings = { format: $('#setFormat').value, bitrate: $('#setBitrate').value, lyrics: $('#setLyrics').checked };
@@ -6489,6 +6500,15 @@ function downloadZip(trackIds, name) {
         .catch((error) => toast(error.message, 'error'));
 }
 
+const offlineLimitGb = () => Math.max(2, parseFloat(store.get('offlineLimitGb', 10)) || 10);
+const offlineLimitBytes = () => offlineLimitGb() * 1024 ** 3;
+async function syncOfflineLimit() { // the service worker reads this before storing anything
+    try {
+        const c = await caches.open('spotdlr-config');
+        await c.put('/offline-limit', new Response(String(offlineLimitGb())));
+    } catch { /* first offline load: the worker falls back to its default */ }
+}
+
 async function cacheForOffline(trackIds, name) {
     // Pre-loads the playlist onto this device for offline play, with cancel,
     // per-playlist status, and a clear button. Needs an active service worker.
@@ -6538,13 +6558,19 @@ async function cacheForOffline(trackIds, name) {
                 go.disabled = false;
                 const controller = new AbortController();
                 go.onclick = () => { cancelled = true; controller.abort(); };
-                let done = 0, failed = 0, next = 0;
+                let done = 0, failed = 0, next = 0, limitHit = false;
                 const missing = tracks.filter((t) => !cached.has(t.id));
                 const worker = async () => {
-                    while (!cancelled) {
+                    while (!cancelled && !limitHit) {
                         const i = next++;
                         if (i >= missing.length) return;
                         const t = missing[i];
+                        if (i % 4 === 0) { // cheapest honest check: origin usage vs the budget
+                            try {
+                                const est = await navigator.storage.estimate();
+                                if (est && est.usage >= offlineLimitBytes()) { limitHit = true; return; }
+                            } catch { /* estimate unavailable: quota errors are handled anyway */ }
+                        }
                         try {
                             const r = await fetch(streamUrl(t), { signal: controller.signal });
                             if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -6557,9 +6583,12 @@ async function cacheForOffline(trackIds, name) {
                 };
                 await Promise.all([worker(), worker(), worker()]);
                 await paint();
-                status.textContent = cancelled ? `Stopped after ${done} of ${missing.length}.` :
+                status.textContent = limitHit ? `Storage limit reached (${offlineLimitGb()} GB) — stopped after ${done} new ${done === 1 ? 'song' : 'songs'}. Raise the limit in Settings → Downloads to continue.` :
+                    cancelled ? `Stopped after ${done} of ${missing.length}.` :
                     failed ? `Done with ${failed} failed.` : `Done: ${plural(tracks.length, 'song')} ready offline.`;
-                toast(cancelled ? 'Offline download cancelled.' : failed ? `Offline cache: ${failed} failed.` : `${plural(tracks.length, 'song')} ready offline.`, (cancelled || failed) ? 'error' : '');
+                toast(limitHit ? `Offline limit reached (${offlineLimitGb()} GB).` :
+                    cancelled ? 'Offline download cancelled.' : failed ? `Offline cache: ${failed} failed.` : `${plural(tracks.length, 'song')} ready offline.`,
+                    (limitHit || cancelled || failed) ? 'error' : '');
                 go.textContent = 'Download missing';
                 go.onclick = null;
                 setBusy(false);
@@ -7078,6 +7107,7 @@ function bindWindowCheckIn() {
     // permission to wipe the whole origin (worker included) under disk pressure. Never awaited —
     // a stalled prompt must not hold the app behind the launch screen.
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch { /* unsupported */ }
+    if ('caches' in window) syncOfflineLimit().catch(() => {});
     bindFileDrop();
     bindImageFallback();
     bindChartTooltip();

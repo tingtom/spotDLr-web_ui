@@ -3,7 +3,7 @@ const VERSION = 'spotdlr-phone-v42';
 const SHELL = `${VERSION}-shell`;
 const ART = `${VERSION}-art`;
 const MUSIC = 'spotdlr-music'; // stable name: survives SW version bumps so updates never wipe offline songs
-const MUSIC_LIMIT = 4000; // tracks; oldest evicted first (backstop only — playlist-scale, quota is the real ceiling)
+const MUSIC_LIMIT = 20000; // tracks; backstop only — the client's GB budget (spotdlr-config) is the real limit
 const HOME = '__HOME_URL__'; // filled in by the server: the home Wi-Fi address, or empty
 const APP_SHELL = [
     '/',
@@ -120,10 +120,21 @@ self.addEventListener('fetch', (event) => {
             try {
                 const response = await fetch(request);
                 if (response.ok && response.status === 200) {
-                    try {
-                        await cache.put(key, response.clone());
-                        trim(MUSIC, MUSIC_LIMIT);
-                    } catch { /* storage quota: the song plays, it just isn't kept */ }
+                    let allow = true;
+                    try { // honour the user's offline storage budget before storing
+                        const cfg = await caches.match('/offline-limit', { cacheName: 'spotdlr-config' });
+                        const gb = cfg ? parseFloat(await cfg.text()) : NaN;
+                        if (isFinite(gb)) {
+                            const est = await navigator.storage.estimate();
+                            if (est && est.usage >= gb * 1024 ** 3) allow = false;
+                        }
+                    } catch { /* no known budget: quota errors are handled below */ }
+                    if (allow) {
+                        try {
+                            await cache.put(key, response.clone());
+                            trim(MUSIC, MUSIC_LIMIT);
+                        } catch { /* storage quota: the song plays, it just isn't kept */ }
+                    }
                 }
                 return response;
             } catch {
