@@ -574,21 +574,27 @@ function loadAndPlay() {
         if (ready && err.name === 'NotAllowedError' && currentTrack() === t) { unswapPlayers(t); return play(); }
         throw err;
     }).catch((err) => {
-        if (err.name === 'NotAllowedError' && document.hidden) {
-            // Screen locked: no tap is possible, and Chrome can refuse the first background
-            // play(). Keep retrying instead of parking on an overlay nobody can press.
+        if (err.name === 'AbortError') return false;
+        if (document.hidden) {
+            // Screen locked: no tap is possible, Android may throttle background network, and
+            // Chrome can refuse background play(). Keep trying — reloading the source when the
+            // load itself failed — instead of parking on an overlay nobody can press.
+            const url = `/api/stream/${encodeURIComponent(t.id)}`;
             let tries = 0;
             const retry = () => P.audio.play().then(() => {}).catch((e2) => {
                 if (e2.name === 'AbortError') return; // a newer track took over
-                if (++tries < 10 && document.hidden && e2.name === 'NotAllowedError') setTimeout(retry, 2000);
-                else if (e2.name === 'NotAllowedError' && document.hidden) mediaSessionRetryHint();
-                else if (e2.name !== 'NotAllowedError') showTapToPlay(P.context?.label || t.title);
+                if (e2.name === 'NotSupportedError' || e2.name === 'NetworkError') {
+                    try { P.audio.src = url; P.audio.load(); } catch { /* next try */ }
+                }
+                if (++tries < 60 && document.hidden) setTimeout(retry, 3000); // ~3 minutes while locked
+                else if (document.hidden) mediaSessionRetryHint(); // give up quietly; the app is out of sight
+                else showTapToPlay(P.context?.label || t.title); // visible again and still failing
             });
-            setTimeout(retry, 1000);
+            setTimeout(retry, 2000);
             return false;
         }
         if (err.name === 'NotAllowedError') showTapToPlay(P.context?.label || t.title); // no click on this page yet
-        else if (err.name !== 'AbortError') toast(`Couldn't play "${t.title}"`, 'error');
+        else toast(`Couldn't play "${t.title}"`, 'error');
         return false;
     });
     updateNowPlaying();
