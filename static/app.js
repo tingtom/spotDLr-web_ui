@@ -3643,9 +3643,12 @@ function openSettings(focus = 'appearance') {
             const found = keys.find((k) => k === 'spotdlr-music' || /^spotdlr-phone-v\d+-music$/.test(k));
             if (found) songs = (await caches.open(found).then((c) => c.keys())).length;
         } catch { /* no cache access */ }
+        let persisted = null;
+        try { persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : null; } catch { /* unsupported */ }
+        const storageNote = persisted === null ? '' : persisted ? ', storage protected from eviction' : ', ⚠ storage evictable';
         el.textContent = controlled
-            ? `Offline: worker ${ver} active, ${songs} song${songs === 1 ? '' : 's'} cached on this device.`
-            : `Offline: worker not in control (served ${ver}). Reload once on this address, then retry.`;
+            ? `Offline: worker ${ver} active, ${songs} song${songs === 1 ? '' : 's'} cached on this device${storageNote}.`
+            : `Offline: worker not in control (served ${ver}, ${songs} songs cached${storageNote}). Reload once on this address, then retry.`;
     })();
     const opener = document.activeElement;
     const close = () => { $('#modalRoot').innerHTML = ''; if (opener && opener.focus) opener.focus(); };
@@ -6991,6 +6994,9 @@ function bindWindowCheckIn() {
 }
 
 (async function boot() {
+    // Ask to be exempt from storage eviction: a big offline music cache otherwise gives Chrome
+    // permission to wipe the whole origin (worker included) under disk pressure.
+    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch { /* unsupported */ }
     bindWindowCheckIn();
     paintChrome();
     bindFileDrop();
