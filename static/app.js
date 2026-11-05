@@ -1959,25 +1959,9 @@ function buildFull() {
     buildSound(V.ctx, bus);                    // equalizer, reverb, balance, and on to the speakers
 }
 
-// Nuclear option for devices where Web Audio itself changes the level: tear it all down
-// and play straight from the elements (visualizer goes flat). Toggle from About.
-function bypassWebAudio(on) {
-    V.bypassed = !!on;
-    if (on) {
-        try { V.ctx && V.ctx.close && V.ctx.close(); } catch {}
-        V.ctx = null; V.analyser = null; V.sources = null; V.meters = null;
-        V.tapOnly = false; V.tapSource = null; V.elemSources = null; V.wireMode = null; stopClone();
-        try { graphVolume = null; } catch {}
-        try { xfVolume = null; } catch {}
-        applyVolume();
-    }
-}
-
 function ensureAudioGraph() {
-    // Visualization without effects must not change the sound: the analyser just taps the
-    // elements (pass-through nodes), which otherwise keep playing straight to the speakers.
-    // The full graph is only built when an effect is actually in use, and upgraded to on demand.
-    if (V.bypassed) return false;
+    // Visualizations never touch the live players' path (clone mode: a silent twin feeds the
+    // analyser); the full graph is only built when an effect is actually in use.
     const want = soundInUse() ? 'full' : (V.analysis === 'clone' ? 'clone' : 'tap');
     if (V.analyser && V.wireMode === want) return true;
     if (IOS) { // never route the music through Web Audio here: it would stop when the screen locks
@@ -3412,7 +3396,9 @@ function watchForUpdates() {
 
 // Service workers require HTTPS. Tailscale/Funnel phone links qualify; plain home-Wi-Fi HTTP does not.
 function registerPhoneCache() {
-    if (S.init.on_phone && 'serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
+    // Any secure context: the worker is what makes offline boot possible, so don't gate it on
+    // the init call having succeeded (it can't have, when the phone is offline).
+    if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 let qrLoading = null;
@@ -3619,9 +3605,6 @@ function openSettings(focus = 'appearance') {
                     <div class="about-name">${icon('spotDLr', 20)}<strong>spotDLr</strong><span class="about-version">${S.init.version ? `Version ${S.init.version}` : ''}</span></div>
                     ${buildLine(S.init.build, S.init.version)}
                     <p class="about-build" id="swStatus">Checking offline support…</p>
-                    <p class="about-build" id="menuLog" title="Last menu events (for debugging)">Menu: no events yet.</p>
-                    <p class="about-build" id="audioPath" title="Live audio routing">Audio: …</p>
-                    <p class="about-build"><button type="button" class="link" id="audioBypass">Use direct audio (disables visualizer analysis)</button></p>
                     <p class="about-build" id="clientVer" title="The JavaScript this screen actually runs">App code: checking…</p>
                     <div class="field about-update">
                         <button type="button" class="pill-btn" id="checkForUpdates">Check for updates</button>
@@ -3638,24 +3621,6 @@ function openSettings(focus = 'appearance') {
 
     // Listeners go on the backdrop, which is thrown away on close, so they never pile up
     const backdrop = $('#modalRoot .modal-backdrop');
-    const ml = $('#menuLog', backdrop);
-    if (ml) { ml.textContent = 'Menu: ' + (M.log.length ? M.log.join(' · ') : 'no events yet.'); }
-    const al = $('#audioPath', backdrop);
-    if (al) {
-        let fx = [];
-        try {
-            if (FX.eq.on && FX.eq.gains.some(Boolean)) fx.push('EQ on');
-            if (ROOMS[FX.reverb.room]) fx.push('reverb:' + FX.reverb.room);
-            if (P.balance) fx.push('balance:' + P.balance);
-        } catch {}
-        al.textContent = `Audio: ${V.wireMode || 'direct'}${fx.length ? ' (effects: ' + fx.join(', ') + ')' : ' (no effects)'}, vol ${(P.userVolume * 100) | 0}%` +
-            ` [gains tg=${(+P.trackGain).toFixed(2)} fi=${(+P.fadeIn).toFixed(2)} sl=${(+P.sleepGain).toFixed(2)} wk=${(+P.wakeGain).toFixed(2)} el=${(+P.audio.volume).toFixed(2)} an=${V.analysis || 'tap'}${P.audio.muted ? ' MUTED' : ''}${V.ctx ? (V.ctx.state || '') : ' noctx'}]`;
-        const bb = $('#audioBypass', backdrop);
-        if (bb) {
-            bb.textContent = V.bypassed ? 'Re-enable Web Audio (restores visualizer analysis)' : 'Use direct audio (disables visualizer analysis)';
-            bb.onclick = () => { bypassWebAudio(!V.bypassed); close(); toast(V.bypassed ? 'Direct audio on.' : 'Web Audio restored.'); };
-        }
-    }
     const cv = $('#clientVer', backdrop);
     if (cv) {
         const tag = (document.querySelector('script[src*="app.js"]') || {}).src || '';

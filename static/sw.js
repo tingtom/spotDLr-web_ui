@@ -74,7 +74,7 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    if (url.pathname === '/api/library' || url.pathname.startsWith('/api/preferences/')) {
+    if (url.pathname === '/api/library' || url.pathname === '/api/status/init' || url.pathname.startsWith('/api/preferences/')) {
         // Offline boot: last-known library and prefs when the server is unreachable.
         event.respondWith((async () => {
             const cache = await caches.open(SHELL);

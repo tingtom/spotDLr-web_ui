@@ -1636,8 +1636,8 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: .92em; background
     .extras, .control-buttons .toggle-btn, #npLike { display: none; }  /* ♥ is in Now Playing and the song's swipe */
     .view-pad, .below-hero { padding-left: 16px; padding-right: 16px; }
     .topbar-right { gap: 4px; }
-    .topbar-right > :not(.mobile-more):not(#settingsBtn) { display: none; }
-    .topbar .mobile-more, .topbar #settingsBtn { display: grid; width: 44px; height: 44px; }
+    .topbar-right > :not(.mobile-more) { display: none; }
+    .topbar .mobile-more { display: grid; width: 44px; height: 44px; }
     .search-box { height: 44px; gap: 8px; padding: 0 8px 0 12px; }
     .search-box input { font-size: 16px; } /* under 16px, iOS zooms the page when the box is tapped */
     .search-box:not(.has-value) .clear { display: none; }
