@@ -614,9 +614,29 @@ function loadAndPlay() {
         else toast(`Couldn't play "${t.title}"`, 'error');
         return false;
     });
+    if (document.hidden) armStartWatchdog(t);
     updateNowPlaying();
     saveSession();
     return started;
+}
+
+// Chrome can hold a background play() promise pending forever instead of rejecting it: the
+// rejection-driven retry never runs, audio is silent, and nothing is logged. This watches for
+// the element actually sounding and, if it doesn't, cancels the held attempt (pause) and
+// starts a fresh one (play) — bounded, and it stands down the moment the app is foregrounded.
+let startWatchdog = null;
+function armStartWatchdog(t) {
+    clearInterval(startWatchdog);
+    if (!document.hidden) return;
+    let nudges = 0;
+    startWatchdog = setInterval(() => {
+        if (currentTrack()?.id !== t.id || !document.hidden) { clearInterval(startWatchdog); startWatchdog = null; return; }
+        const started = !P.audio.paused && (P.audio.currentTime || 0) > 0.1;
+        if (started) { clearInterval(startWatchdog); startWatchdog = null; return; }
+        if (++nudges > 40) { clearInterval(startWatchdog); startWatchdog = null; return; } // ~3 min: leave it to unlock
+        try { P.audio.pause(); } catch {} // cancels a held pending play()
+        P.audio.play().catch(() => {});
+    }, 4500);
 }
 
 function recordPlayError(name, track) { // kept so the next unlock can say exactly what failed while locked
@@ -726,8 +746,11 @@ function updatePositionState() {
     } catch { /* stale state (seeking) */ }
 }
 
+function clearStartWatchdog() { if (startWatchdog) { clearInterval(startWatchdog); startWatchdog = null; } }
+
 function updateControls() {
     const playing = playbackIsPlaying();
+    if (playing) clearStartWatchdog();
     $('#playBtn').innerHTML = icon(playing ? 'pause' : 'play', 16).s;
     $('#playBtn').setAttribute('aria-label', playing ? 'Pause' : 'Play');
     const shuffle = $('#shuffleBtn');
