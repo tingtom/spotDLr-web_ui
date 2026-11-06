@@ -639,6 +639,23 @@ function armStartWatchdog(t) {
     }, 4500);
 }
 
+// Keep-screen-while-playing: while the screen stays on, Android never locks, freezes, or kills
+// the app — the reliable way to listen through boundaries on aggressive phones. The lock is
+// released on pause/hide (and the API auto-releases it when the page is hidden by the power button).
+const KA = { want: store.get('keepAwake', false), lock: null };
+async function applyKeepAwake() {
+    try {
+        const should = KA.want && document.visibilityState === 'visible' && !P.audio.paused && !!currentTrack();
+        if (should && !KA.lock && navigator.wakeLock) KA.lock = await navigator.wakeLock.request('screen');
+        else if (!should && KA.lock) { try { await KA.lock.release(); } catch {} KA.lock = null; }
+    } catch { KA.lock = null; } // unsupported or refused
+}
+function setKeepAwake(on) {
+    KA.want = !!on;
+    store.set('keepAwake', KA.want);
+    applyKeepAwake();
+}
+
 function recordPlayError(name, track) { // kept so the next unlock can say exactly what failed while locked
     try { localStorage.setItem('spotdlr.lastPlayError', JSON.stringify({ at: Date.now(), name, title: (track && track.title) || '' })); } catch { /* private mode */ }
 }
@@ -653,7 +670,10 @@ function surfacePlayError() {
         toast(`While locked, playback failed: ${e.name || 'unknown'} — "${e.title}"`, 'error');
     } catch { /* ignore */ }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) surfacePlayError(); });
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { surfacePlayError(); KA.lock = null; applyKeepAwake(); }
+    else applyKeepAwake(); // releases (or hands over to the browser's own handling)
+});
 
 function togglePlay() {
     if (remoteCommand('toggle')) return;
@@ -751,6 +771,7 @@ function clearStartWatchdog() { if (startWatchdog) { clearInterval(startWatchdog
 function updateControls() {
     const playing = playbackIsPlaying();
     if (playing) clearStartWatchdog();
+    applyKeepAwake();
     $('#playBtn').innerHTML = icon(playing ? 'pause' : 'play', 16).s;
     $('#playBtn').setAttribute('aria-label', playing ? 'Pause' : 'Play');
     const shuffle = $('#shuffleBtn');
@@ -3677,6 +3698,10 @@ function openSettings(focus = 'appearance') {
                         <label class="check"><input type="checkbox" id="setDirectViz" ${V.analysis === 'clone' ? 'checked' : ''}> Direct sound while visualizing</label>
                         <small>The players keep a straight line to the speakers and the visualizer reads a silent twin of the same song instead — the analysis path can never change the volume. Use this if the default analysis quiets music on this phone.</small>
                     </div>
+                        <div class="field">
+                            <label class="check"><input type="checkbox" id="setKeepAwake" ${store.get('keepAwake', false) ? new Safe('checked') : ''}> Keep screen on while playing</label>
+                            <small>While music plays, the screen stays awake so Android can't lock, freeze, or kill the app — the reliable way to listen on aggressive phones. Costs battery; released when paused. Pressing the power button still locks, so also pin spotDLr in Recents.</small>
+                        </div>
                     <div class="field">
                         <label for="setCrossfade">Crossfade <span class="field-value" id="crossfadeValue">${PB.crossfade ? `${PB.crossfade} s` : 'Off'}</span></label>
                         <input type="range" class="bar" id="setCrossfade" min="0" max="12" step="1" value="${PB.crossfade}" ${VOLUME_WORKS ? '' : new Safe('disabled')} aria-valuetext="${PB.crossfade ? `${PB.crossfade} seconds` : 'Off'}">
@@ -4050,6 +4075,7 @@ function openSettings(focus = 'appearance') {
         if (r.running && PB.normalize) setTimeout(loudStatus, 2000);
     }).catch(() => {});
     $('#setDirectViz').addEventListener('change', (e) => setAnalysis(e.target.checked ? 'clone' : 'tap'));
+    $('#setKeepAwake').addEventListener('change', (e) => setKeepAwake(e.target.checked));
     $('#setNormalize').addEventListener('change', (e) => {
         PB.normalize = e.target.checked;
         store.set('normalize', PB.normalize);
