@@ -588,6 +588,7 @@ function loadAndPlay() {
         throw err;
     }).catch((err) => {
         if (err.name === 'AbortError') return false;
+        recordPlayError(err.name, t);
         if (document.hidden) {
             // Screen locked: no tap is possible, Android may throttle background network, and
             // Chrome can refuse background play(). Keep trying — reloading the source when the
@@ -598,6 +599,7 @@ function loadAndPlay() {
                 if (XF.prepared && !XF.active) { try { XF.el.pause(); } catch {} XF.prepared = null; } // the old tail's job is done
             }).catch((e2) => {
                 if (e2.name === 'AbortError') return; // a newer track took over
+                recordPlayError(e2.name, t);
                 if (e2.name === 'NotSupportedError' || e2.name === 'NetworkError') {
                     try { P.audio.src = url; P.audio.load(); } catch { /* next try */ }
                 }
@@ -617,9 +619,21 @@ function loadAndPlay() {
     return started;
 }
 
-function mediaSessionRetryHint() { // background play still refused: remember it for the next time the app is seen
-    try { sessionStorage.setItem('spotdlr.bgPlayFailed', String(Date.now())); } catch { /* private mode */ }
+function recordPlayError(name, track) { // kept so the next unlock can say exactly what failed while locked
+    try { localStorage.setItem('spotdlr.lastPlayError', JSON.stringify({ at: Date.now(), name, title: (track && track.title) || '' })); } catch { /* private mode */ }
 }
+
+function surfacePlayError() {
+    try {
+        const raw = localStorage.getItem('spotdlr.lastPlayError');
+        if (!raw) return;
+        localStorage.removeItem('spotdlr.lastPlayError');
+        const e = JSON.parse(raw);
+        if (Date.now() - (e.at || 0) > 15 * 60 * 1000) return;
+        toast(`While locked, playback failed: ${e.name || 'unknown'} — "${e.title}"`, 'error');
+    } catch { /* ignore */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) surfacePlayError(); });
 
 function togglePlay() {
     if (remoteCommand('toggle')) return;
@@ -1084,6 +1098,7 @@ function armPlaybackRecovery() {
         }, { once: true });
         P.audio.play().catch((error) => {
             if (error.name === 'AbortError') return;
+            recordPlayError(error.name, current);
             if (document.hidden) { playbackRecovery.timer = setTimeout(check, RECOVERY_WAIT_MS); return; } // locked: try again next round
             if (error.name !== 'NotAllowedError') toast(`Couldn't resume "${current?.title || 'song'}"`, 'error');
         });
