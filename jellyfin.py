@@ -156,6 +156,16 @@ class JellyfinLibrary:
                         (playlists_dir / f"{safe_name(coll['name'])}.m3u").write_text(
                             "\n".join(lines) + "\n", encoding="utf-8")
                         self.status["playlists"] += 1
+                        # One file per playlist, the properly named one: drop the legacy
+                        # playlist.m3u8 (its paths went stale when the audio moved) and the
+                        # now-empty playlist folder. spotDLr reads Playlists/<name>.m3u.
+                        legacy = self.root / coll["name"] / "playlist.m3u8"
+                        if legacy.exists():
+                            try:
+                                legacy.unlink()
+                                legacy.parent.rmdir()  # only succeeds when nothing else remains
+                            except OSError:
+                                pass
                     except ValueError:
                         # file lives outside the library root: fall back to absolute path
                         pass

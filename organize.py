@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 
 from downloader import safe_folder_name, write_playlist
-from library import ALBUM_FILE, AUDIO_EXTENSIONS, PLAYLIST_FILE
+from library import ALBUM_FILE, AUDIO_EXTENSIONS, PLAYLIST_FILE, PLAYLISTS_DIR
 
 MAX_UPLOAD = 2 * 1024**3   # 2 GB per file: anything bigger isn't a song
 MP3_BITRATES = (128, 192, 256, 320)
@@ -124,6 +124,11 @@ def create_playlist(music_dir: Path, name, paths):
 
 
 def user_playlist(music_dir: Path, key):
+    # Canonical form (Jellyfin mode): Playlists/<key>.m3u with no folder at all.
+    if (music_dir / PLAYLISTS_DIR / f"{key}.m3u").exists():
+        if "/" in key or key in (".", ".."):
+            raise OrganizeError("No such playlist", 404)
+        return music_dir / key  # callers route through write_playlist/rename/delete below
     folder = music_dir / key
     if folder.parent != music_dir or not folder.is_dir() or not is_user_playlist(folder):
         raise OrganizeError("Only playlists you made in spotDLr can be changed", 403)
@@ -131,14 +136,22 @@ def user_playlist(music_dir: Path, key):
 
 
 def rename_playlist(music_dir: Path, key, name):
-    """Renames the playlist's folder. Its playlist.m3u8 uses paths relative to the folder, and the folder
-    stays at the same depth, so every entry still points at the same song."""
+    """Renames the playlist: its canonical Playlists/<name>.m3u file, or (legacy) its folder —
+    playlist.m3u8 uses paths relative to the folder, and the folder stays at the same depth,
+    so every entry still points at the same song."""
     folder = user_playlist(music_dir, key)
     new_name = safe_folder_name(name or "")
     if not new_name:
         raise OrganizeError("Give the playlist a name")
     if new_name == key:
         return key
+    modern = music_dir / PLAYLISTS_DIR / f"{key}.m3u"
+    if modern.exists():
+        target = music_dir / PLAYLISTS_DIR / f"{new_name}.m3u"
+        if target.exists():
+            raise OrganizeError(f'There\'s already a playlist or album called "{new_name}"', 409)
+        modern.rename(target)
+        return new_name
     target = music_dir / new_name
     if target.exists() and target.resolve() != folder.resolve():  # (a case-only rename on macOS is the same folder)
         raise OrganizeError(f'There\'s already a playlist or album called "{new_name}"', 409)
@@ -147,8 +160,12 @@ def rename_playlist(music_dir: Path, key, name):
 
 
 def delete_playlist(music_dir: Path, key):
-    """Removes the playlist, never the songs: the folder holds nothing but the list."""
+    """Removes the playlist, never the songs: the list is all there is."""
     folder = user_playlist(music_dir, key)
+    modern = music_dir / PLAYLISTS_DIR / f"{key}.m3u"
+    if modern.exists():
+        modern.unlink()
+        return
     (folder / PLAYLIST_FILE).unlink()
     try:
         folder.rmdir()

@@ -16,7 +16,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from library import AUDIO_EXTENSIONS, PLAYLIST_FILE
+from library import AUDIO_EXTENSIONS, PLAYLIST_FILE, PLAYLISTS_DIR
 
 STALL_SECONDS = 300          # no output from spotDL for this long = stuck (e.g. dead credentials)
 BASE_TIMEOUT = 900           # plus PER_TRACK_TIMEOUT per expected track
@@ -32,7 +32,17 @@ def _audio_files(folder: Path):
 
 
 def write_playlist(folder: Path, paths):
-    """playlist.m3u8 in the playlist's folder, so songs already owned elsewhere still show up in it, in order."""
+    """The playlist file for `folder`: the canonical Playlists/<name>.m3u when it exists
+    (Jellyfin mode), else playlist.m3u8 in the playlist's folder, so songs already owned
+    elsewhere still show up in it, in order."""
+    modern = folder.parent / PLAYLISTS_DIR / f"{folder.name}.m3u"
+    if modern.exists():
+        modern.parent.mkdir(parents=True, exist_ok=True)
+        lines = ["#EXTM3U"] + ["../" + Path(os.path.relpath(p, modern.parent)).as_posix() for p in paths if p]
+        tmp = modern.with_name(modern.name + ".tmp")
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(tmp, modern)
+        return
     folder.mkdir(parents=True, exist_ok=True)
     lines = ["#EXTM3U"] + [Path(os.path.relpath(p, folder)).as_posix() for p in paths if p]
     tmp = folder / (PLAYLIST_FILE + ".tmp")

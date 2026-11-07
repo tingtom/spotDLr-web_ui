@@ -33,6 +33,7 @@ YOUTUBE_ID = re.compile(r"(?:[?&]v=|youtu\.be/)([\w-]{11})")
 # Written by the downloader into a playlist/album folder: every song in order, including songs that
 # were already in the library and so live in another folder. Standard m3u8, so VLC etc. read it too.
 PLAYLIST_FILE = "playlist.m3u8"
+PLAYLISTS_DIR = "Playlists"  # canonical home once Jellyfin mode has converted the library
 ALBUM_FILE = ".album.json"  # preserves an album's identity when it includes songs stored elsewhere
 
 JUNK_FOLDER_NAME = re.compile(r"^(https?open|album_\d|playlist_\d|artist_\d)")
@@ -65,6 +66,12 @@ class Library:
                     continue
                 if path.name == PLAYLIST_FILE and path.parent.parent == self.root:
                     playlists[path.parent.name] = (_read_playlist(path, self.root), path.stat().st_mtime)
+                    continue
+                # Canonical playlists (Jellyfin mode): Playlists/<Spotify name>.m3u, entries
+                # like ../Artist/Album/track.mp3 — _read_playlist normalises those fine.
+                if (path.parent.name == PLAYLISTS_DIR and path.parent.parent == self.root
+                        and path.suffix.lower() in (".m3u", ".m3u8")):
+                    playlists.setdefault(path.stem, (_read_playlist(path, self.root), path.stat().st_mtime))
                     continue
                 if not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
                     continue
