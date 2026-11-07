@@ -1340,7 +1340,7 @@ img { display: block; }
 .modal.wide.settings-modal { width: min(760px, 100%); height: min(660px, calc(100dvh - 32px)); display: flex; flex-direction: column; overflow: hidden; }
 .settings-modal .modal-head { flex: none; }
 .settings-modal .modal-head h2 { margin-bottom: 0; }
-.settings-tabs { flex: none; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 8px 0 12px; border-bottom: 1px solid var(--line); }
+.settings-tabs { flex: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 4px; padding: 8px 0 12px; border-bottom: 1px solid var(--line); }
 .settings-tabs [role="tab"] {
     min-height: 44px; padding: 8px 6px; border-radius: 8px; font-size: 13px; font-weight: 700; color: var(--sub);
     transition: color .18s ease, background-color .18s ease, box-shadow .22s ease, transform .22s cubic-bezier(.2,.8,.2,1);

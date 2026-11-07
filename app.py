@@ -44,7 +44,8 @@ from genres import Genres  # noqa: E402
 import stats  # noqa: E402
 from library import MEDIA_TYPES, Library  # noqa: E402
 from lyrics import Lyrics, LyricsError  # noqa: E402
-import organize  # noqa: E402
+import organize
+from jellyfin import JellyfinLibrary  # noqa: E402
 import cleanup  # noqa: E402
 import loudness  # noqa: E402
 import phone  # noqa: E402
@@ -130,9 +131,40 @@ song_loudness = loudness.Loudness(DATA_DIR / "loudness.json", ytmusic.ffmpeg_pat
 exporter = Exporter(ytmusic.ffmpeg_path)  # "Send to device"
 abx_tests = abx.ABX(DATA_DIR / ".abx", ytmusic.ffmpeg_path)  # blind listening tests
 apple = apple_music.AppleMusic(ytmusic.ffmpeg_path)  # "Add to Apple Music" (Mac)
+jellyfin_lib = JellyfinLibrary(DOWNLOAD_DIR, DATA_DIR)  # Jellyfin music-library mode
+
+
+@app.get("/api/jellyfin")
+def jellyfin_state():
+    return jellyfin_lib.snapshot()
+
+
+@app.post("/api/jellyfin/enable")
+def jellyfin_enable():
+    jellyfin_lib.set_enabled(True)
+    started = jellyfin_lib.start(jellyfin_lib.playlist_collections())
+    return {**jellyfin_lib.snapshot(), "started": started}
+
+
+@app.post("/api/jellyfin/convert")
+def jellyfin_convert():
+    if not jellyfin_lib.start(jellyfin_lib.playlist_collections()):
+        raise HTTPException(409, "A conversion is already running")
+    return jellyfin_lib.snapshot()
+
+
+@app.post("/api/jellyfin/disable")
+def jellyfin_disable():
+    jellyfin_lib.set_enabled(False)
+    return jellyfin_lib.snapshot()
+
+
 downloader = Downloader(
     DOWNLOAD_DIR,
-    on_finished=lambda job: logger.info(f"Job {job['id']} {job['status']}: {job['title']} ({job['message']})"),
+    on_finished=lambda job: (
+        logger.info(f"Job {job['id']} {job['status']}: {job['title']} ({job['message']})"),
+        jellyfin_lib.start(jellyfin_lib.playlist_collections()) if jellyfin_lib.enabled else None,
+    ),
     owned_video_ids=lambda: {v: library.path_for(i) for v, i in library.youtube_index().items()},
     owned_spotify_ids=lambda: {v: library.path_for(i) for v, i in library.spotify_index().items()},
     save_lyrics=lyrics.save_lrc,  # "Include lyrics": an .lrc next to each new song

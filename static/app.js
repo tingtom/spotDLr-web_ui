@@ -3565,7 +3565,7 @@ function openSettings(focus = 'appearance') {
     const currentInk = currentTheme.ink || '#000000';
     const lossless = (f) => f === 'flac' || f === 'wav';
     const tabs = [['appearance', 'Appearance'], ['playback', 'Playback'], ['downloads', 'Downloads'],
-        ['spotify', 'Spotify'], ...(!S.init.on_phone ? [['phone', 'Phone access']] : []), ['about', 'About']];
+        ['jellyfin', 'Jellyfin'], ['spotify', 'Spotify'], ...(!S.init.on_phone ? [['phone', 'Phone access']] : []), ['about', 'About']];
     const initialTab = tabs.some(([key]) => key === focus) ? focus : 'appearance';
     $('#modalRoot').innerHTML = html`
         <div class="modal-backdrop" data-close>
@@ -3635,6 +3635,18 @@ function openSettings(focus = 'appearance') {
                     </details>
                 </section>
 
+                <section class="modal-section" role="tabpanel" id="settings-panel-jellyfin" aria-labelledby="settings-tab-jellyfin" ${initialTab === 'jellyfin' ? '' : new Safe('hidden')}>
+                    <h3>Jellyfin</h3>
+                    <p class="dialog-note">Re-files downloads as <strong>Artist/Album/track</strong> (one folder per album, names cleaned of characters Jellyfin dislikes, metadata already in the tags) and writes every playlist as <strong>Playlists/&lt;playlist name&gt;.m3u</strong> inside the library. The original playlist.m3u8 files are kept. Point a Jellyfin music library at this folder.</p>
+                    <div class="field">
+                        <label class="check"><input type="checkbox" id="setJellyfin"> Jellyfin library mode</label>
+                        <small id="jellyfinStatus" role="status">Checking…</small>
+                    </div>
+                    <div class="field">
+                        <button type="button" class="pill-btn" id="jellyfinConvert">Convert library now</button>
+                        <small>Runs again whenever a download finishes while the mode is on.</small>
+                    </div>
+                </section>
                 <section class="modal-section" role="tabpanel" id="settings-panel-spotify" aria-labelledby="settings-tab-spotify" ${initialTab === 'spotify' ? '' : new Safe('hidden')}>
                     <h3 id="credsTitle">Spotify connection</h3>
                     <div id="connStatus">${connectionLine(S.init)}</div>
@@ -4142,6 +4154,33 @@ function openSettings(focus = 'appearance') {
     });
 
     $('#setFormat').addEventListener('change', (e) => { $('#setBitrate').disabled = lossless(e.target.value); });
+    (() => { // Jellyfin panel: state, enable/disable, convert with live progress
+        const toggle = $('#setJellyfin', backdrop), status = $('#jellyfinStatus', backdrop), convert = $('#jellyfinConvert', backdrop);
+        if (!toggle) return;
+        let timer = null;
+        const refresh = async () => {
+            try {
+                const st = await api('/jellyfin');
+                toggle.checked = !!st.enabled;
+                if (st.running) status.textContent = `Converting… ${st.moved} of ${st.total} files moved`;
+                else if (st.message) status.textContent = `${st.enabled ? 'On' : 'Off'} — ${st.message}`;
+                else status.textContent = st.enabled ? 'On' : 'Off';
+                clearTimeout(timer);
+                if (st.running) timer = setTimeout(refresh, 2000);
+            } catch (e) { status.textContent = `Jellyfin state unavailable: ${e.message}`; }
+        };
+        refresh();
+        toggle.addEventListener('change', async () => {
+            status.textContent = toggle.checked ? 'Enabling — converting the library…' : 'Disabled (files stay where they are)';
+            try { await api(toggle.checked ? '/jellyfin/enable' : '/jellyfin/disable', { method: 'POST' }); await refresh(); }
+            catch (e) { status.textContent = e.message; }
+        });
+        convert?.addEventListener('click', async () => {
+            status.textContent = 'Converting…';
+            try { await api('/jellyfin/convert', { method: 'POST' }); await refresh(); }
+            catch (e) { status.textContent = e.message; }
+        });
+    })();
     $('#setOfflineLimit').addEventListener('input', (e) => {
         store.set('offlineLimitGb', +e.target.value);
         $('#offlineLimitValue').textContent = `${offlineLimitGb()} GB`;
