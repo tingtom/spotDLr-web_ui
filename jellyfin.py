@@ -61,14 +61,28 @@ class JellyfinLibrary:
     # ---------- conversion ----------
 
     def playlist_collections(self) -> list[dict]:
-        """Top-level folders that hold a playlist.m3u8 — name = the Spotify playlist name."""
+        """Top-level folders that hold a playlist.m3u8 — name = the Spotify playlist name.
+        Once converted the folder has no audio left; recover the file list from the
+        canonical Playlists/<name>.m3u so a re-run can still clean up the legacy list."""
         out = []
+        playlists_dir = self.root / "Playlists"
         for folder in sorted(self.root.iterdir()) if self.root.is_dir() else []:
             if not folder.is_dir() or folder.name == "Playlists":
                 continue
-            if (folder / "playlist.m3u8").exists():
-                out.append({"name": folder.name,
-                            "paths": [p for p in folder.rglob("*") if p.suffix.lower() in AUDIO]})
+            if not (folder / "playlist.m3u8").exists():
+                continue
+            paths = [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO]
+            if not paths:
+                modern = playlists_dir / f"{folder.name}.m3u"
+                if modern.exists():
+                    for line in modern.read_text(encoding="utf-8-sig").splitlines():
+                        line = line.strip().replace("\\", "/")
+                        if not line or line.startswith("#"):
+                            continue
+                        candidate = (playlists_dir / line).resolve()
+                        if candidate.is_file() and candidate.suffix.lower() in AUDIO:
+                            paths.append(candidate)
+            out.append({"name": folder.name, "paths": paths})
         return out
 
     def start(self, collections: list[dict] | None = None) -> bool:

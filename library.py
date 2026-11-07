@@ -71,7 +71,8 @@ class Library:
                 # like ../Artist/Album/track.mp3 — _read_playlist normalises those fine.
                 if (path.parent.name == PLAYLISTS_DIR and path.parent.parent == self.root
                         and path.suffix.lower() in (".m3u", ".m3u8")):
-                    playlists.setdefault(path.stem, (_read_playlist(path, self.root), path.stat().st_mtime))
+                    # Canonical wins: a legacy playlist.m3u8 with stale paths must not shadow it.
+                    playlists[path.stem] = (_read_playlist(path, self.root), path.stat().st_mtime)
                     continue
                 if not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
                     continue
