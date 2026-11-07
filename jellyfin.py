@@ -80,6 +80,8 @@ class JellyfinLibrary:
                         if not line or line.startswith("#"):
                             continue
                         candidate = (playlists_dir / line).resolve()
+                        if not candidate.is_file():
+                            candidate = (self.root / line.lstrip("./")).resolve()
                         if candidate.is_file() and candidate.suffix.lower() in AUDIO:
                             paths.append(candidate)
             out.append({"name": folder.name, "paths": paths})
@@ -163,8 +165,9 @@ class JellyfinLibrary:
                             new = moved_map.get(old, old)
                             if not new.exists():
                                 continue
-                            rel = new.relative_to(self.root).as_posix()
-                            lines.append(f"../{rel}")
+                            # Library-root relative (no ../): Jellyfin resolves playlist
+                            # entries against the library root, spotDLr accepts both forms.
+                            lines.append(new.relative_to(self.root).as_posix())
                         if len(lines) == 1:
                             continue
                         (playlists_dir / f"{safe_name(coll['name'])}.m3u").write_text(

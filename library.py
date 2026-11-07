@@ -275,7 +275,15 @@ def _read_playlist(path: Path, root: Path):
         if not line or line.startswith("#"):
             continue
         rel = os.path.normpath(os.path.join(path.parent.name, line)).replace(os.sep, "/")
-        if not rel.startswith("../"):
+        if rel.startswith("../"):
+            rel = None
+        elif not (root / rel).exists():
+            # Canonical playlist files store library-root-relative entries (Jellyfin's
+            # resolution); accept those too when the folder-relative guess is wrong.
+            root_rel = os.path.normpath(line).replace(os.sep, "/")
+            if not root_rel.startswith("../") and (root / root_rel).exists():
+                rel = root_rel
+        if rel:
             out.append(rel)
     return out
 
