@@ -268,6 +268,13 @@ def ping():
     return {"app": "spotDLr", "version": version.VERSION}
 
 
+@app.post("/api/diag")
+def receive_diag(payload: dict = Body(...)):
+    """Android shell diagnostics: stored separately so the app's own prefs sync can't clobber it."""
+    (DATA_DIR / "diag.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
 @app.get("/api/status/init")
 def check_initialization(request: Request):
     """Is Spotify usable? Search and downloads fall back to YouTube Music when it isn't.
